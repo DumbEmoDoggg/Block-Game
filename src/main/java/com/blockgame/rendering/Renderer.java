@@ -8,13 +8,21 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE;
 import static org.lwjgl.opengl.GL13.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL20.*;
@@ -51,9 +59,14 @@ public class Renderer {
 
     // Crosshair geometry
     private int crosshairVao, crosshairVbo;
+    // OpenGL texture loaded from GUI/crosshair.png
+    private int crosshairTexId;
 
-    // Hotbar slot-background geometry (dark quads, bright for selected)
+    // Hotbar slot-background geometry (textured quad using GUI/hotbar.png)
     private int hotbarVao, hotbarVbo;
+    private int hotbarImageVao, hotbarImageVbo;
+    // OpenGL texture loaded from GUI/hotbar.png
+    private int hotbarTexId;
     private static final int HOTBAR_SLOTS = 8;
 
     // Hotbar icon geometry (textured quads over each slot)
@@ -92,6 +105,11 @@ public class Renderer {
         buildHotbar();
         buildIconHotbar();
         buildHighlight();
+
+        // Load GUI overlay images (crosshair + hotbar background)
+        crosshairTexId = loadGuiTexture("crosshair");
+        hotbarTexId    = loadGuiTexture("hotbar");
+        buildHotbarImage();
 
         // Read initial framebuffer size
         IntBuffer w = BufferUtils.createIntBuffer(1);
@@ -256,15 +274,21 @@ public class Renderer {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // --- Crosshair ---
-        hudShader.use();
-        glBindVertexArray(crosshairVao);
-        glDrawArrays(GL_LINES, 0, 4);
+        // --- Hotbar image background (textured quad using GUI/hotbar.png) ---
+        if (hotbarTexId != 0) {
+            iconShader.use();
+            iconShader.setInt("uIcons", 0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, hotbarTexId);
+            glBindVertexArray(hotbarImageVao);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
-        // --- Hotbar slot backgrounds ---
+        // --- Selected slot highlight (single semi-transparent white quad) ---
         updateHotbarColors();
+        hudShader.use();
         glBindVertexArray(hotbarVao);
-        glDrawArrays(GL_TRIANGLES, 0, HOTBAR_SLOTS * 2 * 3);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         // --- Hotbar block icons ---
         updateIconHotbar();
@@ -274,8 +298,18 @@ public class Renderer {
         textureAtlas.bindIcons();
         glBindVertexArray(iconVao);
         glDrawArrays(GL_TRIANGLES, 0, HOTBAR_SLOTS * 2 * 3);
-        glBindTexture(GL_TEXTURE_2D, 0);
 
+        // --- Crosshair image (textured quad using GUI/crosshair.png) ---
+        if (crosshairTexId != 0) {
+            iconShader.use();
+            iconShader.setInt("uIcons", 0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, crosshairTexId);
+            glBindVertexArray(crosshairVao);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
         glBindVertexArray(0);
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
@@ -286,29 +320,49 @@ public class Renderer {
     // -------------------------------------------------------------------------
 
     private void buildCrosshair() {
-        float s = 0.022f;
+        // Textured quad centred at the screen origin.  UV convention matches fillIconBuffer:
+        // screen-bottom → v=1, screen-top → v=0.
+        float s = 0.022f;  // half-size in NDC (same visible extent as the old line crosshair)
         float[] v = {
-            -s, 0f,   // horizontal left
-             s, 0f,   // horizontal right
-             0f, -s,  // vertical bottom
-             0f,  s   // vertical top
+            // pos x,  pos y,  u,   v
+            -s, -s,  0f, 1f,
+             s, -s,  1f, 1f,
+             s,  s,  1f, 0f,
+            -s, -s,  0f, 1f,
+             s,  s,  1f, 0f,
+            -s,  s,  0f, 0f
         };
         crosshairVao = glGenVertexArrays();
         crosshairVbo = glGenBuffers();
-        uploadHudGeometry(crosshairVao, crosshairVbo, v, 2);
+
+        glBindVertexArray(crosshairVao);
+        glBindBuffer(GL_ARRAY_BUFFER, crosshairVbo);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(v.length);
+        fb.put(v).flip();
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
+
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
     }
 
     /**
-     * Builds a static template for the hotbar slot backgrounds; colors are
-     * updated every frame via {@link #updateHotbarColors()}.
+     * Builds the VAO for the selected-slot highlight quad.
+     * Only a single slot-sized quad is emitted; it is updated every frame in
+     * {@link #updateHotbarColors()} to follow the currently selected slot.
      */
     private void buildHotbar() {
         hotbarVao = glGenVertexArrays();
         hotbarVbo = glGenBuffers();
 
-        // Allocate buffer: each slot = 2 triangles × 3 vertices × (2 pos + 3 color) floats
+        // 1 slot × 2 triangles × 3 vertices × (2 pos + 3 color) floats
         int floatsPerSlot = 2 * 3 * (2 + 3);
-        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(floatsPerSlot);
 
         fillHotbarBuffer(fb, player.getHotbarIndex());
         fb.flip();
@@ -327,10 +381,10 @@ public class Renderer {
         glBindVertexArray(0);
     }
 
-    /** Re-uploads hotbar slot-background vertex colors (dark gray / bright for selected). */
+    /** Re-uploads the selected-slot highlight quad each frame. */
     private void updateHotbarColors() {
         int floatsPerSlot = 2 * 3 * (2 + 3);
-        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(floatsPerSlot);
 
         fillHotbarBuffer(fb, player.getHotbarIndex());
         fb.flip();
@@ -341,8 +395,8 @@ public class Renderer {
     }
 
     /**
-     * Fills {@code fb} with slot-background quad vertices.
-     * Normal slots are dark gray; the selected slot is lighter.
+     * Fills {@code fb} with a single white quad covering the selected slot.
+     * Rendered at low alpha by the HUD shader to act as a highlight overlay.
      */
     private void fillHotbarBuffer(FloatBuffer fb, int selected) {
         float slotSize = 0.07f;
@@ -351,28 +405,66 @@ public class Renderer {
         float startX   = -totalW / 2f;
         float bottomY  = -0.92f;
 
-        for (int i = 0; i < HOTBAR_SLOTS; i++) {
-            float x0 = startX + i * (slotSize + gap);
-            float x1 = x0 + slotSize;
-            float y0 = bottomY;
-            float y1 = bottomY + slotSize;
+        float x0 = startX + selected * (slotSize + gap);
+        float x1 = x0 + slotSize;
+        float y0 = bottomY;
+        float y1 = bottomY + slotSize;
 
-            // Normal slot: dark gray; selected slot: brighter border tint
-            float gray = (i == selected) ? 0.75f : 0.25f;
-            float r = gray, g = gray, b = gray;
+        float r = 1f, g = 1f, b = 1f;  // white selection highlight
+        putVertex(fb, x0, y0, r, g, b);
+        putVertex(fb, x1, y0, r, g, b);
+        putVertex(fb, x1, y1, r, g, b);
 
-            putVertex(fb, x0, y0, r, g, b);
-            putVertex(fb, x1, y0, r, g, b);
-            putVertex(fb, x1, y1, r, g, b);
-
-            putVertex(fb, x0, y0, r, g, b);
-            putVertex(fb, x1, y1, r, g, b);
-            putVertex(fb, x0, y1, r, g, b);
-        }
+        putVertex(fb, x0, y0, r, g, b);
+        putVertex(fb, x1, y1, r, g, b);
+        putVertex(fb, x0, y1, r, g, b);
     }
 
     private static void putVertex(FloatBuffer fb, float x, float y, float r, float g, float b) {
         fb.put(x).put(y).put(r).put(g).put(b);
+    }
+
+    /**
+     * Builds a textured quad that covers the entire hotbar area, rendered using
+     * the {@code GUI/hotbar.png} image as the background.
+     */
+    private void buildHotbarImage() {
+        float slotSize = 0.07f;
+        float gap      = 0.01f;
+        float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
+        float pad      = 0.01f;  // small border around the slot area
+
+        float x0 = -totalW / 2f - pad;
+        float x1 =  totalW / 2f + pad;
+        float y0 = -0.92f - pad;
+        float y1 = -0.92f + slotSize + pad;
+
+        float[] v = {
+            x0, y0,  0f, 1f,
+            x1, y0,  1f, 1f,
+            x1, y1,  1f, 0f,
+            x0, y0,  0f, 1f,
+            x1, y1,  1f, 0f,
+            x0, y1,  0f, 0f
+        };
+
+        hotbarImageVao = glGenVertexArrays();
+        hotbarImageVbo = glGenBuffers();
+
+        glBindVertexArray(hotbarImageVao);
+        glBindBuffer(GL_ARRAY_BUFFER, hotbarImageVbo);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(v.length);
+        fb.put(v).flip();
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
+
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
     }
 
     // -------------------------------------------------------------------------
@@ -465,6 +557,60 @@ public class Renderer {
     }
 
     // -------------------------------------------------------------------------
+    // GUI texture loader
+    // -------------------------------------------------------------------------
+
+    /**
+     * Loads a PNG image from {@code /GUI/<name>.png} on the classpath and
+     * uploads it to the GPU as an RGBA texture with nearest-neighbour filtering.
+     *
+     * @param name filename without extension, e.g. {@code "crosshair"}
+     * @return OpenGL texture ID, or {@code 0} if the resource could not be loaded
+     */
+    private static int loadGuiTexture(String name) {
+        String path = "/GUI/" + name + ".png";
+        try (InputStream in = Renderer.class.getResourceAsStream(path)) {
+            if (in == null) {
+                Logger.getLogger(Renderer.class.getName())
+                      .warning("GUI texture not found: " + path);
+                return 0;
+            }
+            BufferedImage img = ImageIO.read(in);
+            if (img == null) {
+                Logger.getLogger(Renderer.class.getName())
+                      .warning("Failed to decode GUI texture: " + path);
+                return 0;
+            }
+
+            int w = img.getWidth();
+            int h = img.getHeight();
+            int[] pixels = img.getRGB(0, 0, w, h, null, 0, w);
+            ByteBuffer buf = BufferUtils.createByteBuffer(w * h * 4);
+            for (int pixel : pixels) {
+                buf.put((byte) ((pixel >> 16) & 0xFF)); // R
+                buf.put((byte) ((pixel >>  8) & 0xFF)); // G
+                buf.put((byte) ( pixel        & 0xFF)); // B
+                buf.put((byte) ((pixel >> 24) & 0xFF)); // A
+            }
+            buf.flip();
+
+            int id = glGenTextures();
+            glBindTexture(GL_TEXTURE_2D, id);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            return id;
+        } catch (IOException e) {
+            Logger.getLogger(Renderer.class.getName())
+                  .log(Level.WARNING, "Error loading GUI texture: " + path, e);
+            return 0;
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Generic HUD VAO helper (position-only, 2D)
     // -------------------------------------------------------------------------
 
@@ -499,8 +645,12 @@ public class Renderer {
 
         glDeleteVertexArrays(crosshairVao);
         glDeleteBuffers(crosshairVbo);
+        if (crosshairTexId != 0) glDeleteTextures(crosshairTexId);
         glDeleteVertexArrays(hotbarVao);
         glDeleteBuffers(hotbarVbo);
+        glDeleteVertexArrays(hotbarImageVao);
+        glDeleteBuffers(hotbarImageVbo);
+        if (hotbarTexId != 0) glDeleteTextures(hotbarTexId);
         glDeleteVertexArrays(iconVao);
         glDeleteBuffers(iconVbo);
         glDeleteVertexArrays(highlightVao);
