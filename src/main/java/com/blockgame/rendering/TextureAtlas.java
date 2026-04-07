@@ -64,8 +64,20 @@ public class TextureAtlas {
     public static final int TILE_LEAVES     = 6;
     public static final int TILE_SAND       = 7;
     public static final int TILE_SNOW       = 8;
+    public static final int TILE_PLANKS     = 9;
 
     private final int textureId;
+    private final int iconTextureId;
+
+    // Icon atlas layout: one 32×32 icon per non-AIR solid block type
+    // All solid block types in order (matches ICON_BLOCKS array)
+    public static final BlockType[] ICON_BLOCKS = {
+        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
+        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
+        BlockType.SNOW,  BlockType.PLANKS
+    };
+    public static final int ICON_SIZE   = 32; // pixels per icon
+    public static final int ICON_COUNT  = ICON_BLOCKS.length;
 
     /** Tile-key → PNG filename (without extension), loaded from block_textures.json. */
     private static final Map<String, String> TEXTURE_MAP = loadTextureMap();
@@ -77,6 +89,8 @@ public class TextureAtlas {
     public TextureAtlas() {
         BufferedImage atlas = buildAtlas();
         textureId = uploadToGpu(atlas);
+        BufferedImage iconAtlas = buildIconAtlas(atlas);
+        iconTextureId = uploadToGpu(iconAtlas);
     }
 
     // -------------------------------------------------------------------------
@@ -88,9 +102,37 @@ public class TextureAtlas {
         glBindTexture(GL_TEXTURE_2D, textureId);
     }
 
+    /** Binds the icon atlas (block hotbar icons) to the currently-active texture unit. */
+    public void bindIcons() {
+        glBindTexture(GL_TEXTURE_2D, iconTextureId);
+    }
+
     /** Releases OpenGL resources. */
     public void cleanup() {
         glDeleteTextures(textureId);
+        glDeleteTextures(iconTextureId);
+    }
+
+    /**
+     * Returns the index into {@link #ICON_BLOCKS} for the given block type,
+     * or -1 if the block has no icon.
+     */
+    public static int getIconIndex(BlockType block) {
+        for (int i = 0; i < ICON_BLOCKS.length; i++) {
+            if (ICON_BLOCKS[i] == block) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Returns [u0, v0, u1, v1] UV coordinates into the icon atlas for the
+     * given block icon index (from {@link #getIconIndex}).
+     * The icon atlas is a horizontal strip: ICON_COUNT × 1 icons.
+     */
+    public static float[] getIconUV(int iconIndex) {
+        float u0 = (float)  iconIndex        / ICON_COUNT;
+        float u1 = (float) (iconIndex + 1)   / ICON_COUNT;
+        return new float[]{u0, 0f, u1, 1f};
     }
 
     /**
@@ -127,6 +169,7 @@ public class TextureAtlas {
             case LEAVES: return TILE_LEAVES;
             case SAND:   return TILE_SAND;
             case SNOW:   return TILE_SNOW;
+            case PLANKS: return TILE_PLANKS;
             default:     return TILE_DIRT;
         }
     }
@@ -135,8 +178,151 @@ public class TextureAtlas {
     // Atlas generation
     // -------------------------------------------------------------------------
 
-    private BufferedImage buildAtlas() {
-        BufferedImage img = new BufferedImage(ATLAS_W, ATLAS_H, BufferedImage.TYPE_INT_ARGB);
+    /**
+     * Builds the icon atlas: a horizontal strip of {@link #ICON_COUNT} icons,
+     * each {@link #ICON_SIZE}×{@link #ICON_SIZE} pixels.
+     *
+     * <p>Each icon is an isometric representation of the block showing the top
+     * face and two side faces, rendered using Java 2D affine shearing/scaling
+     * applied to the 16×16 tile images extracted from the main atlas.
+     */
+    private static BufferedImage buildIconAtlas(BufferedImage mainAtlas) {
+        int totalW = ICON_SIZE * ICON_COUNT;
+        BufferedImage iconAtlas = new BufferedImage(totalW, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g2 = iconAtlas.createGraphics();
+        g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                            java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+
+        for (int i = 0; i < ICON_BLOCKS.length; i++) {
+            BlockType block = ICON_BLOCKS[i];
+            int ox = i * ICON_SIZE; // x offset in icon atlas
+
+            // Extract face tiles from the main atlas
+            BufferedImage topTile   = extractTile(mainAtlas, getTileId(block, true,  false));
+            BufferedImage sideTile  = extractTile(mainAtlas, getTileId(block, false, true));
+            BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
+
+            // --- Isometric layout (pixel art style) ---
+            // The icon is 32×32. We draw:
+            //   Top face:   a rhombus at y=0 → y=10, full width 32
+            //   Left face:  left half, y=8  → y=30
+            //   Right face: right half, y=8 → y=30
+            //
+            // Top face: shear horizontally to form a diamond/rhombus
+            //   Source: 16×16 tile → Dest: 32×12 rhombus (each row offset by 1)
+            drawIsometricTop(iconAtlas, topTile, ox);
+            drawIsometricLeft(iconAtlas, sideTile, ox);
+            drawIsometricRight(iconAtlas, rightTile, ox);
+        }
+
+        g2.dispose();
+        return iconAtlas;
+    }
+
+    /**
+     * Extracts the 16×16 tile at the given tileId from the main atlas image.
+     */
+    private static BufferedImage extractTile(BufferedImage atlas, int tileId) {
+        int col = tileId % ATLAS_COLS;
+        int row = tileId / ATLAS_COLS;
+        int ox  = col * TILE_SIZE;
+        int oy  = row * TILE_SIZE;
+        BufferedImage tile = new BufferedImage(TILE_SIZE, TILE_SIZE, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < TILE_SIZE; y++) {
+            for (int x = 0; x < TILE_SIZE; x++) {
+                tile.setRGB(x, y, atlas.getRGB(ox + x, oy + y));
+            }
+        }
+        return tile;
+    }
+
+    /**
+     * Draws the top face of an isometric block icon into {@code dest} at x-offset {@code ox}.
+     *
+     * <p>The top face is projected as a diamond (parallelogram) spanning the full
+     * 32-pixel icon width and about 10 pixels tall at the top of the icon.
+     * Pixel (srcX, srcY) of the 16×16 tile maps to a 2×1 pixel rhombus in the icon.
+     */
+    private static void drawIsometricTop(BufferedImage dest, BufferedImage tile, int ox) {
+        // Each source pixel → 2 destination pixels wide, 1 pixel tall
+        // Top-left corner of the rhombus: (0, 8) in the icon
+        // Row srcY shifts the start-x by -srcY and +srcX
+        for (int sy = 0; sy < TILE_SIZE; sy++) {
+            for (int sx = 0; sx < TILE_SIZE; sx++) {
+                int argb = tile.getRGB(sx, sy);
+                // Isometric mapping: each step right = +2, -1; each step down = -2, -1 (for top view)
+                int dx = sx * 2 - sy * 2;
+                int dy = sx + sy;
+                // Center in 32-wide icon: add half-width offset
+                int px = ox + dx; // range: -(2*15)=−30 to +(2*15)=+30 from center... need re-centering
+                // Re-center: dx ranges [-30, 30], we want [0, 31]
+                px = ox + dx + ICON_SIZE / 2 - 1;
+                int py = dy / 2; // range [0, 15]
+                if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+                    dest.setRGB(px, py, argb);
+                    // Fill the second pixel to the right to avoid gaps
+                    if (px + 1 < ox + ICON_SIZE) {
+                        dest.setRGB(px + 1, py, argb);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Draws the left (front) side face of the isometric icon.
+     * The left face is below the top-left edge of the rhombus.
+     */
+    private static void drawIsometricLeft(BufferedImage dest, BufferedImage tile, int ox) {
+        // Left face: left half of the icon, y=8..30
+        // Source x maps to icon column 0..15, source y maps down with a slight skew
+        int topY = 8; // where the top face ends on the left
+        for (int sy = 0; sy < TILE_SIZE; sy++) {
+            for (int sx = 0; sx < TILE_SIZE; sx++) {
+                int argb = tile.getRGB(sx, sy);
+                // Darken the left face slightly (ambient occlusion effect)
+                argb = darkenColor(argb, 0.70f);
+                // Left face: x maps left half (px 0..15), y maps down with isometric skew
+                int px = ox + sx;
+                int py = topY + sy + (TILE_SIZE - 1 - sx) / 2;
+                if (px >= ox && px < ox + ICON_SIZE / 2 && py >= 0 && py < ICON_SIZE) {
+                    dest.setRGB(px, py, argb);
+                }
+            }
+        }
+    }
+
+    /**
+     * Draws the right side face of the isometric icon.
+     * The right face is below the top-right edge of the rhombus.
+     */
+    private static void drawIsometricRight(BufferedImage dest, BufferedImage tile, int ox) {
+        int topY = 8;
+        for (int sy = 0; sy < TILE_SIZE; sy++) {
+            for (int sx = 0; sx < TILE_SIZE; sx++) {
+                int argb = tile.getRGB(sx, sy);
+                // Darken the right face slightly more (shadow side)
+                argb = darkenColor(argb, 0.85f);
+                // Right face: x maps right half (px 16..31), skewed oppositely
+                int px = ox + ICON_SIZE / 2 + sx;
+                int py = topY + sy + sx / 2;
+                if (px >= ox + ICON_SIZE / 2 && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+                    dest.setRGB(px, py, argb);
+                }
+            }
+        }
+    }
+
+    /** Multiplies the RGB channels of an ARGB colour by {@code factor}, preserving alpha. */
+    private static int darkenColor(int argb, float factor) {
+        int a = (argb >> 24) & 0xFF;
+        int r = clamp((int) (((argb >> 16) & 0xFF) * factor));
+        int g = clamp((int) (((argb >>  8) & 0xFF) * factor));
+        int b = clamp((int) (( argb        & 0xFF) * factor));
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private BufferedImage buildAtlas() {        BufferedImage img = new BufferedImage(ATLAS_W, ATLAS_H, BufferedImage.TYPE_INT_ARGB);
 
         drawTile(img, TILE_GRASS_TOP,  loadTile(textureName("grass_top"),  () -> grassTop()));
         drawTile(img, TILE_GRASS_SIDE, loadTile(textureName("grass_side"), () -> grassSide()));
@@ -147,6 +333,7 @@ public class TextureAtlas {
         drawTile(img, TILE_LEAVES,     loadTile(textureName("leaves"),     () -> leaves()));
         drawTile(img, TILE_SAND,       loadTile(textureName("sand"),       () -> sand()));
         drawTile(img, TILE_SNOW,       loadTile(textureName("snow"),       () -> snow()));
+        drawTile(img, TILE_PLANKS,     loadTile(textureName("planks"),     () -> planks()));
 
         return img;
     }
@@ -404,6 +591,31 @@ public class TextureAtlas {
             for (int px = 0; px < TILE_SIZE; px++) {
                 int v = rng.nextInt(14) - 4;
                 setRgb(img, px, py, clamp(237 + v), clamp(243 + v), 255);
+            }
+        }
+        return img;
+    }
+
+    private static BufferedImage planks() {
+        // Horizontal wooden board stripes
+        Random rng = new Random(9L);
+        BufferedImage img = solid(162, 130, 78);
+        // Board seam lines every 4 pixels
+        for (int py = 0; py < TILE_SIZE; py += 4) {
+            for (int px = 0; px < TILE_SIZE; px++) {
+                setRgb(img, px, py, 100, 75, 40);
+            }
+        }
+        // Vertical grain within each board
+        for (int px = 0; px < TILE_SIZE; px++) {
+            for (int py = 0; py < TILE_SIZE; py++) {
+                if (py % 4 == 0) continue; // skip seam lines already drawn
+                int v = rng.nextInt(20) - 10;
+                int base = img.getRGB(px, py);
+                int r = clamp(((base >> 16) & 0xFF) + v);
+                int g = clamp(((base >>  8) & 0xFF) + v);
+                int b = clamp(( base        & 0xFF) + v / 2);
+                setRgb(img, px, py, r, g, b);
             }
         }
         return img;

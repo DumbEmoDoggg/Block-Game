@@ -58,12 +58,16 @@ public class Player {
     private final int[] targetedBlock      = new int[3];
     private final int[] targetedFaceNormal = new int[3];
 
-    // Hotbar: the 7 placeable block types
+    // Hotbar: the 8 placeable block types
     private static final BlockType[] HOTBAR = {
         BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND, BlockType.SNOW
+        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
+        BlockType.SNOW,  BlockType.PLANKS
     };
     private int hotbarIndex = 0;
+
+    // Whether the mouse cursor is captured (first-person look active)
+    private boolean mouseCaptured = true;
 
     // Dependencies
     private final World        world;
@@ -103,6 +107,8 @@ public class Player {
     // -------------------------------------------------------------------------
 
     private void handleMouseLook() {
+        if (!mouseCaptured) return;
+
         double mx = input.getMouseX();
         double my = input.getMouseY();
 
@@ -407,6 +413,17 @@ public class Player {
     public int       getHotbarIndex()        { return hotbarIndex; }
     public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
     public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
+
+    /**
+     * Enables or disables first-person mouse look (cursor capture).
+     * When re-enabling, resets the first-mouse flag to avoid a jump.
+     */
+    public void setMouseCaptured(boolean captured) {
+        if (captured && !this.mouseCaptured) {
+            firstMouse = true;
+        }
+        this.mouseCaptured = captured;
+    }
 
     /** Teleports the player to the given world-space feet position. */
     public void setPosition(float x, float y, float z) {
