@@ -407,4 +407,9 @@ public class Player {
     public int       getHotbarIndex()        { return hotbarIndex; }
     public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
     public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
+
+    /** Teleports the player to the given world-space feet position. */
+    public void setPosition(float x, float y, float z) {
+        position.set(x, y, z);
+    }
 }

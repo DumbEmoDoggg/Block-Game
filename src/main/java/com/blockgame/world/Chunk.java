@@ -1,5 +1,9 @@
 package com.blockgame.world;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+
 /**
  * A 16×16×128 region of the world.
  *
@@ -79,5 +83,34 @@ public class Chunk {
 
     public void setDirty(boolean dirty) {
         this.dirty = dirty;
+    }
+
+    // -------------------------------------------------------------------------
+    // Serialisation helpers (package-private, used by World save/load)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Writes the raw block data for this chunk to {@code out}.
+     * Format: SIZE × HEIGHT rows of SIZE bytes each (lx outer, y middle, lz inner).
+     */
+    void saveToStream(DataOutputStream out) throws IOException {
+        for (int lx = 0; lx < SIZE; lx++) {
+            for (int y = 0; y < HEIGHT; y++) {
+                out.write(blocks[lx][y]);
+            }
+        }
+    }
+
+    /**
+     * Reads raw block data from {@code in} into this chunk and marks it dirty.
+     * Must be called with data written by {@link #saveToStream}.
+     */
+    void loadFromStream(DataInputStream in) throws IOException {
+        for (int lx = 0; lx < SIZE; lx++) {
+            for (int y = 0; y < HEIGHT; y++) {
+                in.readFully(blocks[lx][y]);
+            }
+        }
+        dirty = true;
     }
 }

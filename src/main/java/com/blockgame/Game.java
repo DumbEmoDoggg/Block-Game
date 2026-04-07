@@ -4,12 +4,16 @@ import com.blockgame.input.InputHandler;
 import com.blockgame.player.Player;
 import com.blockgame.rendering.Renderer;
 import com.blockgame.world.World;
+import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 
+import java.io.IOException;
 import java.nio.IntBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
@@ -24,6 +28,10 @@ public class Game {
     public static final int WINDOW_WIDTH  = 1280;
     public static final int WINDOW_HEIGHT = 720;
     public static final String WINDOW_TITLE = "Block Game";
+
+    /** Save file location: {@code ~/.blockgame/world.dat} */
+    private static final Path SAVE_FILE =
+        Path.of(System.getProperty("user.home"), ".blockgame", "world.dat");
 
     private long window;
     private World world;
@@ -93,6 +101,17 @@ public class Game {
         player       = new Player(world, inputHandler, (float) WINDOW_WIDTH / WINDOW_HEIGHT);
         renderer     = new Renderer(window, world, player);
 
+        // Restore the last saved world (if one exists)
+        if (Files.exists(SAVE_FILE)) {
+            try {
+                Vector3f savedPos = world.load(SAVE_FILE);
+                player.setPosition(savedPos.x, savedPos.y, savedPos.z);
+                System.out.println("[BlockGame] Save loaded from " + SAVE_FILE);
+            } catch (IOException e) {
+                System.err.println("[BlockGame] Could not load save: " + e.getMessage());
+            }
+        }
+
         // Capture mouse cursor
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -121,6 +140,16 @@ public class Game {
             dt = Math.min(dt, 0.05f);
 
             glfwPollEvents();
+
+            // Save world when Enter is pressed
+            if (inputHandler.isKeyJustPressed(GLFW_KEY_ENTER)) {
+                try {
+                    world.save(SAVE_FILE, player.getPosition());
+                    System.out.println("[BlockGame] World saved to " + SAVE_FILE);
+                } catch (IOException e) {
+                    System.err.println("[BlockGame] Could not save world: " + e.getMessage());
+                }
+            }
 
             player.update(dt);
             world.update(player.getPosition());
