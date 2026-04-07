@@ -313,7 +313,7 @@ public class TextureAtlas {
         }
     }
 
-    /** Multiplies the RGB channels of an ARGB colour by {@code factor}, preserving alpha. */
+    /** Multiplies the RGB channels of an ARGB color by {@code factor}, preserving alpha. */
     private static int darkenColor(int argb, float factor) {
         int a = (argb >> 24) & 0xFF;
         int r = clamp((int) (((argb >> 16) & 0xFF) * factor));
@@ -625,7 +625,7 @@ public class TextureAtlas {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Creates a solid-colour 16×16 tile. */
+    /** Creates a solid-color 16×16 tile. */
     private static BufferedImage solid(int r, int g, int b) {
         BufferedImage img = new BufferedImage(TILE_SIZE, TILE_SIZE, BufferedImage.TYPE_INT_ARGB);
         int argb = 0xFF000000 | (r << 16) | (g << 8) | b;
