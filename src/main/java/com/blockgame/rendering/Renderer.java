@@ -43,6 +43,7 @@ public class Renderer {
 
     private Shader worldShader;
     private Shader hudShader;
+    private Shader iconShader;
     private Shader highlightShader;
     private TextureAtlas textureAtlas;
 
@@ -51,9 +52,12 @@ public class Renderer {
     // Crosshair geometry
     private int crosshairVao, crosshairVbo;
 
-    // Hotbar quad geometry
+    // Hotbar slot-background geometry (dark quads, bright for selected)
     private int hotbarVao, hotbarVbo;
-    private static final int HOTBAR_SLOTS = 7;
+    private static final int HOTBAR_SLOTS = 8;
+
+    // Hotbar icon geometry (textured quads over each slot)
+    private int iconVao, iconVbo;
 
     // Block-face highlight geometry
     private int highlightVao, highlightVbo;
@@ -80,11 +84,13 @@ public class Renderer {
 
         worldShader = new Shader("shaders/vertex.glsl",             "shaders/fragment.glsl");
         hudShader   = new Shader("shaders/hud_vertex.glsl",  "shaders/hud_fragment.glsl");
+        iconShader  = new Shader("shaders/icon_vertex.glsl", "shaders/icon_fragment.glsl");
         highlightShader = new Shader("shaders/highlight_vertex.glsl", "shaders/highlight_fragment.glsl");
         textureAtlas = new TextureAtlas();
 
         buildCrosshair();
         buildHotbar();
+        buildIconHotbar();
         buildHighlight();
 
         // Read initial framebuffer size
@@ -247,18 +253,31 @@ public class Renderer {
 
     private void renderHud() {
         glDisable(GL_DEPTH_TEST);
-        hudShader.use();
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         // --- Crosshair ---
+        hudShader.use();
         glBindVertexArray(crosshairVao);
         glDrawArrays(GL_LINES, 0, 4);
 
-        // --- Hotbar ---
+        // --- Hotbar slot backgrounds ---
         updateHotbarColors();
         glBindVertexArray(hotbarVao);
         glDrawArrays(GL_TRIANGLES, 0, HOTBAR_SLOTS * 2 * 3);
 
+        // --- Hotbar block icons ---
+        updateIconHotbar();
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+        glActiveTexture(GL_TEXTURE0);
+        textureAtlas.bindIcons();
+        glBindVertexArray(iconVao);
+        glDrawArrays(GL_TRIANGLES, 0, HOTBAR_SLOTS * 2 * 3);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
         glBindVertexArray(0);
+        glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
     }
 
@@ -280,8 +299,8 @@ public class Renderer {
     }
 
     /**
-     * Builds a static template for the hotbar; colors are updated every frame
-     * via {@link #updateHotbarColors()}.
+     * Builds a static template for the hotbar slot backgrounds; colors are
+     * updated every frame via {@link #updateHotbarColors()}.
      */
     private void buildHotbar() {
         hotbarVao = glGenVertexArrays();
@@ -291,35 +310,7 @@ public class Renderer {
         int floatsPerSlot = 2 * 3 * (2 + 3);
         FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
 
-        float slotSize  = 0.07f;
-        float gap       = 0.01f;
-        float totalW    = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
-        float startX    = -totalW / 2f;
-        float bottomY   = -0.92f;
-
-        BlockType[] hotbar = player.getHotbar();
-        int selected = player.getHotbarIndex();
-
-        for (int i = 0; i < HOTBAR_SLOTS; i++) {
-            float x0 = startX + i * (slotSize + gap);
-            float x1 = x0 + slotSize;
-            float y0 = bottomY;
-            float y1 = bottomY + slotSize;
-
-            BlockType bt = hotbar[i];
-            float r = bt.r, g = bt.g, b = bt.b;
-            // Highlight selected slot
-            if (i == selected) { r = Math.min(r + 0.3f, 1f); g = Math.min(g + 0.3f, 1f); b = Math.min(b + 0.3f, 1f); }
-
-            // Two triangles
-            putVertex(fb, x0, y0, r, g, b);
-            putVertex(fb, x1, y0, r, g, b);
-            putVertex(fb, x1, y1, r, g, b);
-
-            putVertex(fb, x0, y0, r, g, b);
-            putVertex(fb, x1, y1, r, g, b);
-            putVertex(fb, x0, y1, r, g, b);
-        }
+        fillHotbarBuffer(fb, player.getHotbarIndex());
         fb.flip();
 
         glBindVertexArray(hotbarVao);
@@ -336,19 +327,29 @@ public class Renderer {
         glBindVertexArray(0);
     }
 
-    /** Re-uploads hotbar vertex colors (position stays the same). */
+    /** Re-uploads hotbar slot-background vertex colors (dark gray / bright for selected). */
     private void updateHotbarColors() {
+        int floatsPerSlot = 2 * 3 * (2 + 3);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
+
+        fillHotbarBuffer(fb, player.getHotbarIndex());
+        fb.flip();
+
+        glBindBuffer(GL_ARRAY_BUFFER, hotbarVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, fb);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    /**
+     * Fills {@code fb} with slot-background quad vertices.
+     * Normal slots are dark gray; the selected slot is lighter.
+     */
+    private void fillHotbarBuffer(FloatBuffer fb, int selected) {
         float slotSize = 0.07f;
         float gap      = 0.01f;
         float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
         float startX   = -totalW / 2f;
         float bottomY  = -0.92f;
-
-        BlockType[] hotbar  = player.getHotbar();
-        int         selected = player.getHotbarIndex();
-
-        int floatsPerSlot = 2 * 3 * (2 + 3);
-        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
 
         for (int i = 0; i < HOTBAR_SLOTS; i++) {
             float x0 = startX + i * (slotSize + gap);
@@ -356,9 +357,9 @@ public class Renderer {
             float y0 = bottomY;
             float y1 = bottomY + slotSize;
 
-            BlockType bt = hotbar[i];
-            float r = bt.r, g = bt.g, b = bt.b;
-            if (i == selected) { r = Math.min(r + 0.3f, 1f); g = Math.min(g + 0.3f, 1f); b = Math.min(b + 0.3f, 1f); }
+            // Normal slot: dark gray; selected slot: brighter border tint
+            float gray = (i == selected) ? 0.75f : 0.25f;
+            float r = gray, g = gray, b = gray;
 
             putVertex(fb, x0, y0, r, g, b);
             putVertex(fb, x1, y0, r, g, b);
@@ -368,15 +369,99 @@ public class Renderer {
             putVertex(fb, x1, y1, r, g, b);
             putVertex(fb, x0, y1, r, g, b);
         }
-        fb.flip();
-
-        glBindBuffer(GL_ARRAY_BUFFER, hotbarVbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, fb);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
     private static void putVertex(FloatBuffer fb, float x, float y, float r, float g, float b) {
         fb.put(x).put(y).put(r).put(g).put(b);
+    }
+
+    // -------------------------------------------------------------------------
+    // Icon hotbar (textured block icons)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Builds the VAO for the icon hotbar quads (position + UV).
+     * The actual UV values are filled in per-frame by {@link #updateIconHotbar()}.
+     */
+    private void buildIconHotbar() {
+        iconVao = glGenVertexArrays();
+        iconVbo = glGenBuffers();
+
+        // Each slot: 2 triangles × 3 vertices × (2 pos + 2 uv) = 24 floats
+        int floatsPerSlot = 2 * 3 * (2 + 2);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
+        fillIconBuffer(fb);
+        fb.flip();
+
+        glBindVertexArray(iconVao);
+        glBindBuffer(GL_ARRAY_BUFFER, iconVbo);
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_DYNAMIC_DRAW);
+
+        int stride = (2 + 2) * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /** Re-uploads icon quad UV + position data each frame. */
+    private void updateIconHotbar() {
+        int floatsPerSlot = 2 * 3 * (2 + 2);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(HOTBAR_SLOTS * floatsPerSlot);
+        fillIconBuffer(fb);
+        fb.flip();
+
+        glBindBuffer(GL_ARRAY_BUFFER, iconVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, fb);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    /**
+     * Fills {@code fb} with icon quad vertex data.
+     * Each slot gets a quad slightly inset from the slot background, textured
+     * with the corresponding block's icon from the icon atlas.
+     */
+    private void fillIconBuffer(FloatBuffer fb) {
+        BlockType[] hotbar = player.getHotbar();
+
+        float slotSize = 0.07f;
+        float gap      = 0.01f;
+        float inset    = 0.005f; // slight inset so background border is visible
+        float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
+        float startX   = -totalW / 2f;
+        float bottomY  = -0.92f;
+
+        for (int i = 0; i < HOTBAR_SLOTS; i++) {
+            float x0 = startX + i * (slotSize + gap) + inset;
+            float x1 = x0 + slotSize - 2 * inset;
+            float y0 = bottomY + inset;
+            float y1 = y0 + slotSize - 2 * inset;
+
+            int iconIdx = TextureAtlas.getIconIndex(hotbar[i]);
+            float[] uv;
+            if (iconIdx >= 0) {
+                uv = TextureAtlas.getIconUV(iconIdx);
+            } else {
+                uv = new float[]{0f, 0f, 0f, 0f}; // invisible for unknown blocks
+            }
+            float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+
+            // Two triangles (CCW winding)
+            putIconVertex(fb, x0, y0, u0, v1);
+            putIconVertex(fb, x1, y0, u1, v1);
+            putIconVertex(fb, x1, y1, u1, v0);
+
+            putIconVertex(fb, x0, y0, u0, v1);
+            putIconVertex(fb, x1, y1, u1, v0);
+            putIconVertex(fb, x0, y1, u0, v0);
+        }
+    }
+
+    private static void putIconVertex(FloatBuffer fb, float x, float y, float u, float v) {
+        fb.put(x).put(y).put(u).put(v);
     }
 
     // -------------------------------------------------------------------------
@@ -405,6 +490,7 @@ public class Renderer {
     public void cleanup() {
         worldShader.cleanup();
         hudShader.cleanup();
+        iconShader.cleanup();
         highlightShader.cleanup();
         textureAtlas.cleanup();
 
@@ -415,6 +501,8 @@ public class Renderer {
         glDeleteBuffers(crosshairVbo);
         glDeleteVertexArrays(hotbarVao);
         glDeleteBuffers(hotbarVbo);
+        glDeleteVertexArrays(iconVao);
+        glDeleteBuffers(iconVbo);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
     }

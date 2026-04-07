@@ -21,7 +21,7 @@ import java.util.Map;
 public class World {
 
     /** How many chunks to keep loaded in each direction from the player chunk. */
-    public static final int RENDER_DISTANCE = 4;
+    public static final int RENDER_DISTANCE = 8;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final PerlinNoise noise = new PerlinNoise(12345L);
@@ -89,7 +89,14 @@ public class World {
                 }
                 // Surface block
                 if (surfaceY > 0) {
-                    BlockType surface = (surfaceY > 80) ? BlockType.SNOW : BlockType.GRASS;
+                    BlockType surface;
+                    if (surfaceY > 80) {
+                        surface = BlockType.SNOW;
+                    } else if (surfaceY < 50) {
+                        surface = BlockType.SAND;  // beach / desert low-land
+                    } else {
+                        surface = BlockType.GRASS;
+                    }
                     chunk.setBlock(lx, surfaceY - 1, lz, surface);
                 }
             }
@@ -99,17 +106,20 @@ public class World {
 
     /**
      * Returns the terrain height (number of solid blocks) at the given world
-     * XZ position using multi-octave Perlin noise (fractional Brownian motion).
+     * XZ position.
      *
-     * <p>4 octaves of Perlin noise are summed with persistence 0.5 and
-     * lacunarity 2.0, giving smooth large-scale hills with smaller surface
-     * details on top.  The result is mapped to a height in roughly [40, 90].
+     * <p>A low-frequency continental noise is passed through a hyperbolic
+     * tangent to create near-flat plateaus separated by steep cliff faces.
+     * A second, higher-frequency detail noise adds surface roughness on top.
+     * The combined result is mapped to a height in roughly [35, 95].
      */
     public int getTerrainHeight(int wx, int wz) {
-        // Sample frequency chosen to give continent-scale features at 0.005
-        double n = noise.octaveNoise(wx * 0.005, wz * 0.005, 4, 0.5, 2.0);
-        // n is in [-1, 1]; map to [40, 90]
-        double h = 65.0 + n * 25.0;
+        // Continental shape: large slow waves → tanh steepens transitions into cliffs
+        double continental = noise.octaveNoise(wx * 0.003, wz * 0.003, 2, 0.5, 2.0);
+        double steep = Math.tanh(continental * 2.8);
+        // Fine surface detail layered on top
+        double detail = noise.octaveNoise(wx * 0.018, wz * 0.018, 3, 0.4, 2.0) * 0.15;
+        double h = 65.0 + (steep + detail) * 25.0;
         return (int) Math.max(2, h);
     }
 

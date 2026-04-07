@@ -41,6 +41,9 @@ public class Game {
 
     private double lastTime;
 
+    /** Whether the mouse cursor is captured for first-person look. */
+    private boolean cursorCaptured = true;
+
     public void run() {
         init();
         loop();
@@ -115,12 +118,9 @@ public class Game {
         // Capture mouse cursor
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-        // Escape = close window
+        // Register key events; Escape is handled in the game loop (cursor toggle)
         glfwSetKeyCallback(window, (win, key, scancode, action, mods) -> {
             inputHandler.onKey(key, action);
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-                glfwSetWindowShouldClose(win, true);
-            }
         });
 
         lastTime = glfwGetTime();
@@ -140,6 +140,14 @@ public class Game {
             dt = Math.min(dt, 0.05f);
 
             glfwPollEvents();
+
+            // Escape toggles cursor capture (first-person look vs. free cursor)
+            if (inputHandler.isKeyJustPressed(GLFW_KEY_ESCAPE)) {
+                cursorCaptured = !cursorCaptured;
+                glfwSetInputMode(window, GLFW_CURSOR,
+                    cursorCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+                player.setMouseCaptured(cursorCaptured);
+            }
 
             // Save world when Enter is pressed
             if (inputHandler.isKeyJustPressed(GLFW_KEY_ENTER)) {

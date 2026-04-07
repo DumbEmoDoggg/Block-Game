@@ -21,7 +21,8 @@ public enum BlockType {
     WOOD  (4, 0.55f, 0.38f, 0.18f, true),
     LEAVES(5, 0.15f, 0.55f, 0.15f, true),
     SAND  (6, 0.90f, 0.80f, 0.50f, true),
-    SNOW  (7, 0.95f, 0.95f, 0.98f, true);
+    SNOW  (7, 0.95f, 0.95f, 0.98f, true),
+    PLANKS(8, 0.80f, 0.55f, 0.28f, true);
 
     /** Compact id stored in chunk byte arrays. Max 255 types. */
     public final int id;
