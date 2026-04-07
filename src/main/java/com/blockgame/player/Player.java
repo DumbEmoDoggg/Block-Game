@@ -53,6 +53,11 @@ public class Player {
     // Block interaction
     private long lastBlockActionMs = 0;
 
+    // Targeted block for highlight rendering (updated every frame)
+    private boolean hasTargetedBlock    = false;
+    private final int[] targetedBlock      = new int[3];
+    private final int[] targetedFaceNormal = new int[3];
+
     // Hotbar: the 7 placeable block types
     private static final BlockType[] HOTBAR = {
         BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
@@ -82,6 +87,7 @@ public class Player {
     public void update(float dt) {
         handleMouseLook();
         handleMovement(dt);
+        updateTargetedBlock();
         handleBlockActions();
         handleHotbarKeys();
 
@@ -295,6 +301,73 @@ public class Player {
         return null;
     }
 
+    // -------------------------------------------------------------------------
+    // Targeted block tracking (used for the face highlight)
+    // -------------------------------------------------------------------------
+
+    private void updateTargetedBlock() {
+        int[] result = raycastFull();
+        if (result != null) {
+            hasTargetedBlock = true;
+            targetedBlock[0] = result[0]; targetedBlock[1] = result[1]; targetedBlock[2] = result[2];
+            targetedFaceNormal[0] = result[3]; targetedFaceNormal[1] = result[4]; targetedFaceNormal[2] = result[5];
+        } else {
+            hasTargetedBlock = false;
+        }
+    }
+
+    /**
+     * DDA ray cast that returns the first solid block hit together with its
+     * face normal (the side the ray entered from).
+     *
+     * @return int[6] = {bx, by, bz, nx, ny, nz}, or {@code null} if nothing
+     *         was hit within reach.
+     */
+    private int[] raycastFull() {
+        Vector3f eye = new Vector3f(position.x, position.y + EYE_HEIGHT, position.z);
+        Vector3f dir = camera.getDirection();
+
+        int bx = (int) Math.floor(eye.x);
+        int by = (int) Math.floor(eye.y);
+        int bz = (int) Math.floor(eye.z);
+
+        int stepX = dir.x >= 0 ? 1 : -1;
+        int stepY = dir.y >= 0 ? 1 : -1;
+        int stepZ = dir.z >= 0 ? 1 : -1;
+
+        float dtX = (dir.x == 0) ? Float.MAX_VALUE : Math.abs(1f / dir.x);
+        float dtY = (dir.y == 0) ? Float.MAX_VALUE : Math.abs(1f / dir.y);
+        float dtZ = (dir.z == 0) ? Float.MAX_VALUE : Math.abs(1f / dir.z);
+
+        float tX = (dir.x == 0) ? Float.MAX_VALUE
+            : ((dir.x > 0 ? (bx + 1 - eye.x) : (eye.x - bx)) / Math.abs(dir.x));
+        float tY = (dir.y == 0) ? Float.MAX_VALUE
+            : ((dir.y > 0 ? (by + 1 - eye.y) : (eye.y - by)) / Math.abs(dir.y));
+        float tZ = (dir.z == 0) ? Float.MAX_VALUE
+            : ((dir.z > 0 ? (bz + 1 - eye.z) : (eye.z - bz)) / Math.abs(dir.z));
+
+        // -1 = none yet,  0 = X axis,  1 = Y axis,  2 = Z axis
+        int lastAxis = -1;
+
+        for (int step = 0; step < 100; step++) {
+            if (world.getBlock(bx, by, bz).solid) {
+                int nx = 0, ny = 0, nz = 0;
+                if      (lastAxis == 0) nx = -stepX;
+                else if (lastAxis == 1) ny = -stepY;
+                else if (lastAxis == 2) nz = -stepZ;
+                return new int[]{bx, by, bz, nx, ny, nz};
+            }
+
+            float t = Math.min(tX, Math.min(tY, tZ));
+            if (t > REACH) return null;
+
+            if (tX <= tY && tX <= tZ) { bx += stepX; tX += dtX; lastAxis = 0; }
+            else if (tY <= tZ)         { by += stepY; tY += dtY; lastAxis = 1; }
+            else                       { bz += stepZ; tZ += dtZ; lastAxis = 2; }
+        }
+        return null;
+    }
+
     /** Returns true if the block position overlaps the player's current AABB. */
     private boolean occupiedByPlayer(int bx, int by, int bz) {
         float hw = PLAYER_WIDTH / 2f;
@@ -327,9 +400,11 @@ public class Player {
     // Getters
     // -------------------------------------------------------------------------
 
-    public Vector3f  getPosition()        { return position; }
-    public Camera    getCamera()           { return camera; }
-    public BlockType getSelectedBlock()    { return HOTBAR[hotbarIndex]; }
-    public BlockType[] getHotbar()         { return HOTBAR; }
-    public int       getHotbarIndex()      { return hotbarIndex; }
+    public Vector3f  getPosition()          { return position; }
+    public Camera    getCamera()             { return camera; }
+    public BlockType getSelectedBlock()      { return HOTBAR[hotbarIndex]; }
+    public BlockType[] getHotbar()           { return HOTBAR; }
+    public int       getHotbarIndex()        { return hotbarIndex; }
+    public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
+    public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
 }
