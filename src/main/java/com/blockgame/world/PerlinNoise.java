@@ -188,7 +188,9 @@ public final class PerlinNoise {
 
     /**
      * 3-D gradient function.  Uses the low 4 bits of {@code hash} to select one
-     * of twelve unit-cube edge vectors.
+     * of Ken Perlin's reference 16 gradient cases (which map to 12 unique cube
+     * edge vectors, with h=12/h=14 and h=13/h=15 being intentional duplicates
+     * for a power-of-two-friendly lookup).
      */
     private static double grad3(int hash, double x, double y, double z) {
         int h = hash & 15;
