@@ -2,6 +2,13 @@ package com.blockgame.world;
 
 import org.joml.Vector3f;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -159,5 +166,72 @@ public class World {
 
     public void cleanup() {
         chunks.clear();
+    }
+
+    // -------------------------------------------------------------------------
+    // Save / Load
+    // -------------------------------------------------------------------------
+
+    /**
+     * Serialises all currently loaded chunks and the player position to a
+     * binary file.
+     *
+     * <p>Format:
+     * <pre>
+     *   int   chunkCount
+     *   for each chunk:
+     *     int  chunkX
+     *     int  chunkZ
+     *     byte[SIZE * HEIGHT * SIZE]  block data (lx outer, y middle, lz inner)
+     *   float  playerX
+     *   float  playerY
+     *   float  playerZ
+     * </pre>
+     *
+     * @param file      destination file (parent directories are created if absent)
+     * @param playerPos current player position to persist
+     * @throws IOException on any I/O error
+     */
+    public void save(Path file, Vector3f playerPos) throws IOException {
+        Files.createDirectories(file.getParent());
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(Files.newOutputStream(file)))) {
+            out.writeInt(chunks.size());
+            for (Chunk chunk : chunks.values()) {
+                out.writeInt(chunk.chunkX);
+                out.writeInt(chunk.chunkZ);
+                chunk.saveToStream(out);
+            }
+            out.writeFloat(playerPos.x);
+            out.writeFloat(playerPos.y);
+            out.writeFloat(playerPos.z);
+        }
+    }
+
+    /**
+     * Replaces the current world state with data read from {@code file}.
+     * Any previously loaded chunks are discarded.
+     *
+     * @param file source file written by {@link #save}
+     * @return the player position that was stored in the save file
+     * @throws IOException on any I/O error
+     */
+    public Vector3f load(Path file) throws IOException {
+        chunks.clear();
+        try (DataInputStream in = new DataInputStream(
+                new BufferedInputStream(Files.newInputStream(file)))) {
+            int count = in.readInt();
+            for (int i = 0; i < count; i++) {
+                int cx = in.readInt();
+                int cz = in.readInt();
+                Chunk chunk = new Chunk(cx, cz);
+                chunk.loadFromStream(in);
+                chunks.put(chunkKey(cx, cz), chunk);
+            }
+            float px = in.readFloat();
+            float py = in.readFloat();
+            float pz = in.readFloat();
+            return new Vector3f(px, py, pz);
+        }
     }
 }

@@ -9,7 +9,7 @@ A basic Minecraft-inspired block-building game written in **Java 17** using [LWJ
 | Feature | Details |
 |---|---|
 | 3-D block world | 16 × 16 × 128 chunks, rendered with OpenGL 3.3 core profile |
-| Procedural terrain | Layered sine-wave height map — hills, valleys, and snow-capped peaks |
+| Procedural terrain | Multi-octave Perlin noise (fBm) — smooth hills, valleys, and snow-capped peaks |
 | Block types | Air, Grass, Dirt, Stone, Wood, Leaves, Sand, Snow |
 | Block interaction | **Left-click** to remove a block · **Right-click** to place one |
 | Movement | WASD to walk · Space to jump · Left-Ctrl to sprint |
@@ -17,6 +17,7 @@ A basic Minecraft-inspired block-building game written in **Java 17** using [LWJ
 | Hotbar | Keys **1–7** or **scroll wheel** to cycle block types (shown at the bottom of the screen) |
 | Crosshair | Always-visible white crosshair |
 | Face lighting | Top = brightest · north/south = medium · east/west = darker · bottom = darkest |
+| Save / Load | Press **Enter** to save the current world and player position to `~/.blockgame/world.dat`; the save is loaded automatically on next startup |
 
 ---
 
@@ -32,6 +33,7 @@ A basic Minecraft-inspired block-building game written in **Java 17** using [LWJ
 | Right-click | Place selected block |
 | 1 – 7 | Select hotbar slot |
 | Scroll wheel | Cycle hotbar slot |
+| Enter | Save world & player position |
 | Escape | Quit |
 
 ---
@@ -89,7 +91,8 @@ src/
 │   │   ├── world/
 │   │   │   ├── BlockType.java     # Block type enum (add new blocks here)
 │   │   │   ├── Chunk.java         # 16×16×128 chunk data
-│   │   │   └── World.java         # Infinite chunk grid + terrain generation
+│   │   │   ├── PerlinNoise.java   # Multi-octave Perlin noise (fBm terrain)
+│   │   │   └── World.java         # Infinite chunk grid + terrain generation + save/load
 │   │   ├── player/
 │   │   │   ├── Camera.java        # View/projection matrices
 │   │   │   └── Player.java        # Movement, physics, block interaction
@@ -116,6 +119,6 @@ src/
 ## Extending the Game
 
 * **Add a new block type** — add an entry to the `BlockType` enum with an id, RGB colour, and `solid` flag. No other changes needed.
-* **Change terrain** — edit `World.getTerrainHeight()`. Drop in a Perlin/Simplex noise library for richer landscapes.
+* **Change terrain** — edit `World.getTerrainHeight()`. Adjust the noise frequency, octave count, or height range for different landscapes.
 * **Increase render distance** — change `World.RENDER_DISTANCE`.
 * **Textures** — replace the per-vertex colour with UV coordinates and add a texture atlas in `ChunkMesh`.
