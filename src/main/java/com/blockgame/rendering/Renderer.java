@@ -15,6 +15,7 @@ import java.util.Map;
 
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.*;
+import static org.lwjgl.opengl.GL13.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL20.*;
 import static org.lwjgl.opengl.GL30.*;
@@ -42,6 +43,7 @@ public class Renderer {
 
     private Shader worldShader;
     private Shader hudShader;
+    private TextureAtlas textureAtlas;
 
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
 
@@ -73,6 +75,7 @@ public class Renderer {
 
         worldShader = new Shader("shaders/vertex.glsl",             "shaders/fragment.glsl");
         hudShader   = new Shader("shaders/hud_vertex.glsl",  "shaders/hud_fragment.glsl");
+        textureAtlas = new TextureAtlas();
 
         buildCrosshair();
         buildHotbar();
@@ -135,10 +138,16 @@ public class Renderer {
         worldShader.setMatrix4f("projection", player.getCamera().getProjectionMatrix());
         worldShader.setVector3f("lightDir",   LIGHT_DIR);
         worldShader.setFloat("ambientStrength", 0.40f);
+        worldShader.setInt("uTexture", 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        textureAtlas.bind();
 
         for (ChunkMesh mesh : chunkMeshes.values()) {
             mesh.render();
         }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     // -------------------------------------------------------------------------
@@ -305,6 +314,7 @@ public class Renderer {
     public void cleanup() {
         worldShader.cleanup();
         hudShader.cleanup();
+        textureAtlas.cleanup();
 
         for (ChunkMesh m : chunkMeshes.values()) m.cleanup();
         chunkMeshes.clear();

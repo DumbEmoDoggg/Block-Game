@@ -69,6 +69,10 @@ public class Shader {
         glUniform1f(location(name), v);
     }
 
+    public void setInt(String name, int v) {
+        glUniform1i(location(name), v);
+    }
+
     public void cleanup() {
         glDeleteProgram(programId);
     }

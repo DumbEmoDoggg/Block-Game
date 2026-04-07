@@ -17,26 +17,20 @@ import static org.lwjgl.opengl.GL30.*;
 /**
  * Builds and renders the triangle mesh for a single {@link Chunk}.
  *
- * <p>Vertex layout (10 floats per vertex):
+ * <p>Vertex layout (9 floats per vertex):
  * <pre>
- *   position (3) | color (3) | normal (3) | skyLight (1)
+ *   position (3) | texCoord (2) | normal (3) | skyLight (1)
  * </pre>
  *
  * <p>Only the visible faces of solid blocks are emitted (faces shared with
- * another solid block are culled).  Face brightness is pre-baked into the
- * vertex color: top = 100 %, north/south = 80 %, east/west = 65 %,
- * bottom = 50 %.
+ * another solid block are culled).  Face brightness is applied in the shader
+ * using pre-baked per-face multipliers: top = 100 %, north/south = 80 %,
+ * east/west = 65 %, bottom = 50 %.
  */
 public class ChunkMesh {
 
-    private static final int FLOATS_PER_VERTEX = 10;
+    private static final int FLOATS_PER_VERTEX = 9;
     private static final int VERTICES_PER_FACE = 6; // 2 triangles × 3 vertices
-
-    // Per-face brightness multipliers (simple ambient occlusion approximation)
-    private static final float BRIGHT_TOP    = 1.00f;
-    private static final float BRIGHT_NS     = 0.80f;
-    private static final float BRIGHT_EW     = 0.65f;
-    private static final float BRIGHT_BOTTOM = 0.50f;
 
     private int vao = 0;
     private int vbo = 0;
@@ -117,35 +111,25 @@ public class ChunkMesh {
     private enum Face { TOP, BOTTOM, NORTH, SOUTH, WEST, EAST }
 
     private void addFace(List<Float> buf, int x, int y, int z, Face face, BlockType block, float skyLight) {
-        float br, bg, bb;   // base color
-        float bright;
+        boolean isTop  = face == Face.TOP;
+        boolean isSide = face != Face.TOP && face != Face.BOTTOM;
 
-        switch (face) {
-            case TOP:
-                // For GRASS, top face uses a vivid green
-                br = block.r; bg = block.g; bb = block.b;
-                bright = BRIGHT_TOP;
-                break;
-            case BOTTOM:
-                br = block.r; bg = block.g; bb = block.b;
-                bright = BRIGHT_BOTTOM;
-                break;
-            case NORTH: case SOUTH:
-                // GRASS sides show a dirt-like color
-                if (block == BlockType.GRASS) { br = 0.55f; bg = 0.35f; bb = 0.15f; }
-                else { br = block.r; bg = block.g; bb = block.b; }
-                bright = BRIGHT_NS;
-                break;
-            default: // WEST / EAST
-                if (block == BlockType.GRASS) { br = 0.55f; bg = 0.35f; bb = 0.15f; }
-                else { br = block.r; bg = block.g; bb = block.b; }
-                bright = BRIGHT_EW;
-                break;
+        int tileId = TextureAtlas.getTileId(block, isTop, isSide);
+        float[] uv = TextureAtlas.getUV(tileId);
+        // uv = [u0, v0, u1, v1]  (v0 = top of tile, v1 = bottom of tile in atlas space)
+        float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+
+        // UV corners per vertex (4 verts) – layout matches quad() vertex order:
+        //   Horizontal faces (TOP/BOTTOM): V0=(u0,v0), V1=(u0,v1), V2=(u1,v1), V3=(u1,v0)
+        //   Vertical   faces (sides):      V0=(u0,v1), V1=(u0,v0), V2=(u1,v0), V3=(u1,v1)
+        float[] us, vs;
+        if (!isSide) {
+            us = new float[]{u0, u0, u1, u1};
+            vs = new float[]{v0, v1, v1, v0};
+        } else {
+            us = new float[]{u0, u0, u1, u1};
+            vs = new float[]{v1, v0, v0, v1};
         }
-
-        float r = br * bright;
-        float g = bg * bright;
-        float b = bb * bright;
 
         float[] quad   = quad(x, y, z, face);
         float[] normal = normal(face);
@@ -155,7 +139,7 @@ public class ChunkMesh {
             buf.add(quad[i * 3]);
             buf.add(quad[i * 3 + 1]);
             buf.add(quad[i * 3 + 2]);
-            buf.add(r); buf.add(g); buf.add(b);
+            buf.add(us[i]); buf.add(vs[i]);
             buf.add(normal[0]); buf.add(normal[1]); buf.add(normal[2]);
             buf.add(skyLight);
         }
@@ -205,13 +189,17 @@ public class ChunkMesh {
         glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
 
         int stride = FLOATS_PER_VERTEX * Float.BYTES;
+        // attrib 0: position  (3 floats, offset 0)
         glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0L);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 3L * Float.BYTES);
+        // attrib 1: texCoord  (2 floats, offset 12)
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3L * Float.BYTES);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 6L * Float.BYTES);
+        // attrib 2: normal    (3 floats, offset 20)
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 5L * Float.BYTES);
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(3, 1, GL_FLOAT, false, stride, 9L * Float.BYTES);
+        // attrib 3: skyLight  (1 float,  offset 32)
+        glVertexAttribPointer(3, 1, GL_FLOAT, false, stride, 8L * Float.BYTES);
         glEnableVertexAttribArray(3);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
