@@ -114,11 +114,14 @@ public class World {
      * The combined result is mapped to a height in roughly [35, 95].
      */
     public int getTerrainHeight(int wx, int wz) {
-        // Continental shape: large slow waves → tanh steepens transitions into cliffs
-        double continental = noise.octaveNoise(wx * 0.003, wz * 0.003, 2, 0.5, 2.0);
-        double steep = Math.tanh(continental * 2.8);
-        // Fine surface detail layered on top
-        double detail = noise.octaveNoise(wx * 0.018, wz * 0.018, 3, 0.4, 2.0) * 0.15;
+        // Continental shape: large slow waves → tanh shapes transitions between elevations.
+        // A lower steepness factor (1.6 vs the previous 2.8) creates more gradual slopes
+        // instead of near-vertical cliff faces.
+        double continental = noise.octaveNoise(wx * 0.003, wz * 0.003, 3, 0.5, 2.0);
+        double steep = Math.tanh(continental * 1.6);
+        // Fine surface detail layered on top — extra octave and amplitude help break up
+        // any remaining sharp edges with natural-looking roughness.
+        double detail = noise.octaveNoise(wx * 0.020, wz * 0.020, 4, 0.45, 2.0) * 0.22;
         double h = 65.0 + (steep + detail) * 25.0;
         return (int) Math.max(2, h);
     }
