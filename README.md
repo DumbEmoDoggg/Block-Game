@@ -38,7 +38,7 @@ A basic Minecraft-inspired block-building game written in **Java 17** using [LWJ
 
 ## Building
 
-**Prerequisites:** JDK 17+, Apache Maven 3.6+
+**Prerequisites:** JDK 17+ (includes `jpackage`), Apache Maven 3.6+
 
 ```bash
 # Clone the repository

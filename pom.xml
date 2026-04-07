@@ -20,6 +20,7 @@
         <joml.version>1.10.7</joml.version>
         <junit.version>5.10.2</junit.version>
         <main.class>com.blockgame.Main</main.class>
+        <app.name>BlockGame</app.name>
     </properties>
 
     <dependencyManagement>
@@ -186,7 +187,7 @@
                         <configuration>
                             <headerType>gui</headerType>
                             <jar>${project.build.directory}/${project.artifactId}-${project.version}-fat.jar</jar>
-                            <outfile>${project.build.directory}/BlockGame.exe</outfile>
+                            <outfile>${project.build.directory}/${app.name}.exe</outfile>
                             <downloadUrl>https://adoptium.net/</downloadUrl>
                             <classPath>
                                 <mainClass>${main.class}</mainClass>
@@ -203,8 +204,8 @@
                                 <productVersion>1.0.0.0</productVersion>
                                 <txtProductVersion>${project.version}</txtProductVersion>
                                 <productName>Block Game</productName>
-                                <internalName>BlockGame</internalName>
-                                <originalFilename>BlockGame.exe</originalFilename>
+                                <internalName>${app.name}</internalName>
+                                <originalFilename>${app.name}.exe</originalFilename>
                             </versionInfo>
                         </configuration>
                     </execution>
@@ -226,7 +227,7 @@
                         <configuration>
                             <target>
                                 <delete dir="${project.build.directory}/jpackage-input" quiet="true"/>
-                                <delete dir="${project.build.directory}/BlockGame" quiet="true"/>
+                                <delete dir="${project.build.directory}/${app.name}" quiet="true"/>
                                 <mkdir dir="${project.build.directory}/jpackage-input"/>
                             </target>
                         </configuration>
@@ -272,7 +273,7 @@
                                 <argument>--main-class</argument>
                                 <argument>${main.class}</argument>
                                 <argument>--name</argument>
-                                <argument>BlockGame</argument>
+                                <argument>${app.name}</argument>
                                 <argument>--dest</argument>
                                 <argument>${project.build.directory}</argument>
                                 <argument>--app-version</argument>
