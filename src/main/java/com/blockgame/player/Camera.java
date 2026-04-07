@@ -38,7 +38,7 @@ public class Camera {
             (float) Math.toRadians(70.0),
             aspectRatio,
             0.05f,
-            800.0f
+            1200.0f
         );
     }
 

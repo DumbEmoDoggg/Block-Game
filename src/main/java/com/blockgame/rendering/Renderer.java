@@ -4,6 +4,7 @@ import com.blockgame.player.Player;
 import com.blockgame.world.BlockType;
 import com.blockgame.world.Chunk;
 import com.blockgame.world.World;
+import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.BufferUtils;
@@ -56,6 +57,18 @@ public class Renderer {
     private TextureAtlas textureAtlas;
 
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
+
+    // LOD thresholds (in chunk-grid units from the player chunk)
+    /** Chunks within this radius get the full-detail mesh (LOD 0). */
+    private static final int LOD_FULL_RADIUS    = 10;
+    /** Squared version used to avoid sqrt in the hot path. */
+    private static final int LOD_FULL_RADIUS_SQ = LOD_FULL_RADIUS * LOD_FULL_RADIUS;
+
+    /** Tracks the LOD level at which each chunk's mesh was last built. */
+    private final Map<Long, Integer> chunkMeshLod = new HashMap<>();
+
+    /** Reused each frame for frustum culling. */
+    private final FrustumIntersection frustum = new FrustumIntersection();
 
     // Crosshair geometry
     private int crosshairVao, crosshairVbo;
@@ -149,25 +162,39 @@ public class Renderer {
     // -------------------------------------------------------------------------
 
     private void rebuildDirtyMeshes() {
+        Vector3f pos = player.getPosition();
+        int pcx = Math.floorDiv((int) pos.x, Chunk.SIZE);
+        int pcz = Math.floorDiv((int) pos.z, Chunk.SIZE);
+
         for (Map.Entry<Long, Chunk> e : world.getChunks().entrySet()) {
             Chunk chunk = e.getValue();
-            if (chunk.isDirty()) {
+            int dx = chunk.chunkX - pcx;
+            int dz = chunk.chunkZ - pcz;
+            int distSq = dx * dx + dz * dz;
+            int lod = (distSq <= LOD_FULL_RADIUS_SQ) ? 0 : 1;
+
+            Integer prevLod = chunkMeshLod.get(e.getKey());
+            if (chunk.isDirty() || prevLod == null || prevLod != lod) {
                 chunkMeshes.computeIfAbsent(e.getKey(), k -> new ChunkMesh())
-                           .build(chunk, world);
+                           .build(chunk, world, lod);
+                chunkMeshLod.put(e.getKey(), lod);
                 chunk.setDirty(false);
             }
         }
         // Drop meshes for chunks that were unloaded
         chunkMeshes.keySet().retainAll(world.getChunks().keySet());
+        chunkMeshLod.keySet().retainAll(world.getChunks().keySet());
     }
 
     private void renderWorld() {
         worldShader.use();
 
         Matrix4f identity = new Matrix4f().identity();
+        Matrix4f view       = player.getCamera().getViewMatrix();
+        Matrix4f projection = player.getCamera().getProjectionMatrix();
         worldShader.setMatrix4f("model",      identity);
-        worldShader.setMatrix4f("view",       player.getCamera().getViewMatrix());
-        worldShader.setMatrix4f("projection", player.getCamera().getProjectionMatrix());
+        worldShader.setMatrix4f("view",       view);
+        worldShader.setMatrix4f("projection", projection);
         worldShader.setVector3f("lightDir",   LIGHT_DIR);
         worldShader.setFloat("ambientStrength", 0.40f);
         worldShader.setInt("uTexture", 0);
@@ -175,8 +202,24 @@ public class Renderer {
         glActiveTexture(GL_TEXTURE0);
         textureAtlas.bind();
 
-        for (ChunkMesh mesh : chunkMeshes.values()) {
-            mesh.render();
+        // Update the frustum from the current projection × view matrix
+        frustum.set(new Matrix4f(projection).mul(view));
+
+        for (Map.Entry<Long, ChunkMesh> e : chunkMeshes.entrySet()) {
+            long key = e.getKey();
+            int cx = (int) (key >> 32);
+            int cz = (int) (key & 0xFFFFFFFFL);
+
+            // Chunk AABB in world space
+            float minX = cx * Chunk.SIZE;
+            float minZ = cz * Chunk.SIZE;
+            float maxX = minX + Chunk.SIZE;
+            float maxZ = minZ + Chunk.SIZE;
+
+            // Test the AABB against the frustum; skip if not visible
+            if (!frustum.testAab(minX, 0f, minZ, maxX, Chunk.HEIGHT, maxZ)) continue;
+
+            e.getValue().render();
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);

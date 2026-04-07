@@ -41,10 +41,42 @@ public class ChunkMesh {
     // -------------------------------------------------------------------------
 
     /**
-     * (Re)builds the mesh from the chunk's current block data.
+     * (Re)builds the mesh from the chunk's current block data at the given
+     * level of detail.
+     *
+     * <p>LOD 0 – full detail: every exposed face of every solid block is emitted.
+     * LOD 1 – surface only: only the top face of the topmost solid block per
+     * column is emitted.  This dramatically reduces the vertex count for chunks
+     * that are far from the player where side-face and underground detail is not
+     * perceptible.
+     *
+     * <p>Must be called from the OpenGL thread.
+     *
+     * @param chunk the chunk to mesh
+     * @param world the world (used to query neighbour chunks for face culling)
+     * @param lod   0 = full detail, 1 = surface only
+     */
+    public void build(Chunk chunk, World world, int lod) {
+        if (lod >= 1) {
+            buildSurface(chunk);
+        } else {
+            buildFull(chunk, world);
+        }
+    }
+
+    /**
+     * Convenience overload that always builds at full detail (LOD 0).
      * Must be called from the OpenGL thread.
      */
     public void build(Chunk chunk, World world) {
+        build(chunk, world, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Full-detail mesh (LOD 0)
+    // -------------------------------------------------------------------------
+
+    private void buildFull(Chunk chunk, World world) {
         List<Float> buf = new ArrayList<>(4096);
 
         for (int lx = 0; lx < Chunk.SIZE; lx++) {
@@ -65,6 +97,39 @@ public class ChunkMesh {
                     if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
                     if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
                     if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
+                }
+            }
+        }
+
+        float[] data = new float[buf.size()];
+        for (int i = 0; i < buf.size(); i++) data[i] = buf.get(i);
+        upload(data);
+    }
+
+    // -------------------------------------------------------------------------
+    // Surface-only mesh (LOD 1)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Builds a surface-only mesh: for each column in the chunk, only the top
+     * face of the topmost solid block is emitted.  This is used for distant
+     * chunks where underground and side-face detail is imperceptible.
+     */
+    private void buildSurface(Chunk chunk) {
+        List<Float> buf = new ArrayList<>(Chunk.SIZE * Chunk.SIZE * FLOATS_PER_VERTEX * VERTICES_PER_FACE);
+
+        for (int lx = 0; lx < Chunk.SIZE; lx++) {
+            for (int lz = 0; lz < Chunk.SIZE; lz++) {
+                // Find the topmost solid block in this column
+                for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
+                    BlockType block = chunk.getBlock(lx, ly, lz);
+                    if (block.solid) {
+                        int wx = chunk.getWorldX(lx);
+                        int wz = chunk.getWorldZ(lz);
+                        // Surface blocks are always sky-lit in the LOD mesh
+                        addFace(buf, wx, ly, wz, Face.TOP, block, 1.0f);
+                        break;
+                    }
                 }
             }
         }

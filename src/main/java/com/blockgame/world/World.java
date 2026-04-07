@@ -21,7 +21,7 @@ import java.util.Map;
 public class World {
 
     /** How many chunks to keep loaded in each direction from the player chunk. */
-    public static final int RENDER_DISTANCE = 8;
+    public static final int RENDER_DISTANCE = 25;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final PerlinNoise noise = new PerlinNoise(12345L);
@@ -206,6 +206,14 @@ public class World {
                 getOrLoadChunk(cx, cz);
             }
         }
+
+        // Unload chunks that have moved out of range to bound memory usage
+        int unloadDistance = RENDER_DISTANCE + 4;
+        chunks.entrySet().removeIf(e -> {
+            Chunk c = e.getValue();
+            return Math.abs(c.chunkX - pcx) > unloadDistance
+                || Math.abs(c.chunkZ - pcz) > unloadDistance;
+        });
     }
 
     public void cleanup() {
