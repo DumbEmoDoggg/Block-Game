@@ -151,8 +151,8 @@ public class ChunkMesh {
             case TOP:    return new float[]{ x,   y+1, z,   x,   y+1, z+1, x+1, y+1, z+1, x+1, y+1, z   };
             case BOTTOM: return new float[]{ x,   y,   z,   x+1, y,   z,   x+1, y,   z+1, x,   y,   z+1 };
             case NORTH:  return new float[]{ x,   y,   z,   x,   y+1, z,   x+1, y+1, z,   x+1, y,   z   };
-            case SOUTH:  return new float[]{ x,   y,   z+1, x+1, y,   z+1, x+1, y+1, z+1, x,   y+1, z+1 };
-            case WEST:   return new float[]{ x,   y,   z,   x,   y,   z+1, x,   y+1, z+1, x,   y+1, z   };
+            case SOUTH:  return new float[]{ x+1, y,   z+1, x+1, y+1, z+1, x,   y+1, z+1, x,   y,   z+1 };
+            case WEST:   return new float[]{ x,   y,   z+1, x,   y+1, z+1, x,   y+1, z,   x,   y,   z   };
             case EAST:   return new float[]{ x+1, y,   z,   x+1, y+1, z,   x+1, y+1, z+1, x+1, y,   z+1 };
             default:     return new float[12];
         }

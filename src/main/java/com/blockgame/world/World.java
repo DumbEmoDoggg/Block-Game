@@ -9,9 +9,7 @@ import java.util.Map;
 /**
  * The game world: an infinite grid of {@link Chunk}s loaded around the player.
  *
- * <p>Terrain is generated procedurally using overlapping sine waves so there
- * are no external library dependencies for noise.  The generation strategy is
- * easy to replace with a proper noise function (e.g. Perlin/Simplex) later.
+ * <p>Terrain is generated procedurally using multi-octave Perlin noise (fBm).
  */
 public class World {
 
@@ -19,6 +17,7 @@ public class World {
     public static final int RENDER_DISTANCE = 4;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
+    private final PerlinNoise noise = new PerlinNoise(12345L);
 
     public World() {
         // Pre-generate the initial area so the player lands on solid ground
@@ -93,13 +92,17 @@ public class World {
 
     /**
      * Returns the terrain height (number of solid blocks) at the given world
-     * XZ position using layered sine/cosine waves.
+     * XZ position using multi-octave Perlin noise (fractional Brownian motion).
+     *
+     * <p>4 octaves of Perlin noise are summed with persistence 0.5 and
+     * lacunarity 2.0, giving smooth large-scale hills with smaller surface
+     * details on top.  The result is mapped to a height in roughly [40, 90].
      */
     public int getTerrainHeight(int wx, int wz) {
-        double h = 64.0;
-        h += 10.0 * Math.sin(wx * 0.06)  * Math.cos(wz * 0.05);
-        h +=  5.0 * Math.sin(wx * 0.13 + 1.1) * Math.cos(wz * 0.11 + 0.7);
-        h +=  2.5 * Math.sin(wx * 0.28 + 2.3) * Math.cos(wz * 0.25 + 1.5);
+        // Sample frequency chosen to give continent-scale features at 0.005
+        double n = noise.octaveNoise(wx * 0.005, wz * 0.005, 4, 0.5, 2.0);
+        // n is in [-1, 1]; map to [40, 90]
+        double h = 65.0 + n * 25.0;
         return (int) Math.max(2, h);
     }
 
