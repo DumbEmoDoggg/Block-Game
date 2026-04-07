@@ -22,9 +22,19 @@ class BlockTypeTest {
         for (BlockType bt : BlockType.values()) {
             if (bt != BlockType.AIR) {
                 assertTrue(bt.solid, bt + " should be solid");
-                assertFalse(bt.isTransparent(), bt + " should not be transparent");
+                // LEAVES is solid for collision but transparent for rendering (see-through gaps)
+                if (bt != BlockType.LEAVES) {
+                    assertFalse(bt.isTransparent(), bt + " should not be transparent");
+                }
             }
         }
+    }
+
+    @Test
+    void leavesAreTransparent() {
+        assertTrue(BlockType.LEAVES.solid,       "LEAVES must remain solid for collision");
+        assertTrue(BlockType.LEAVES.transparent, "LEAVES must be transparent for rendering");
+        assertTrue(BlockType.LEAVES.isTransparent(), "LEAVES.isTransparent() must return true");
     }
 
     @Test

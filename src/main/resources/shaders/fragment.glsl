@@ -17,6 +17,9 @@ const float CAVE_LIGHT = 0.08; // brightness of completely underground/cave face
 void main() {
     vec4 texColor = texture(uTexture, vTexCoord);
 
+    // Discard fully-transparent pixels (e.g. gaps in the leaves texture).
+    if (texColor.a < 0.5) discard;
+
     // Directional lighting from the sun
     float diffuse  = max(dot(normalize(vNormal), normalize(-lightDir)), 0.0);
     float skyLight = ambientStrength + (1.0 - ambientStrength) * diffuse;

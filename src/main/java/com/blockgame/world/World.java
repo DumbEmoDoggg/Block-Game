@@ -101,7 +101,38 @@ public class World {
                 }
             }
         }
+        carveCaves(chunk);
         chunk.setDirty(true);
+    }
+
+    /**
+     * Carves cave tunnels into the chunk using a pair of 3-D noise fields.
+     *
+     * <p>A block is carved out wherever both noise samples are near zero
+     * simultaneously, which creates worm-like tunnels through the terrain.
+     * Carving is skipped within a few blocks of the surface to preserve the
+     * natural terrain shape, and leaves a solid bedrock layer at y = 0-3.
+     */
+    private void carveCaves(Chunk chunk) {
+        for (int lx = 0; lx < Chunk.SIZE; lx++) {
+            for (int lz = 0; lz < Chunk.SIZE; lz++) {
+                int wx = chunk.getWorldX(lx);
+                int wz = chunk.getWorldZ(lz);
+                int surfaceY = getTerrainHeight(wx, wz);
+
+                for (int y = 4; y < surfaceY - 5; y++) {
+                    if (chunk.getBlock(lx, y, lz) == BlockType.AIR) continue;
+
+                    double n1 = noise.octaveNoise3(wx * 0.04, y * 0.04, wz * 0.04,        2, 0.5, 2.0);
+                    double n2 = noise.octaveNoise3(wx * 0.04 + 100, y * 0.04 + 100, wz * 0.04 + 100, 2, 0.5, 2.0);
+
+                    // Carve when both noise values are near zero (worm-tunnel condition)
+                    if (n1 * n1 + n2 * n2 < 0.04) {
+                        chunk.setBlock(lx, y, lz, BlockType.AIR);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -110,19 +141,19 @@ public class World {
      *
      * <p>A low-frequency continental noise is passed through a hyperbolic
      * tangent to create near-flat plateaus separated by steep cliff faces.
-     * A second, higher-frequency detail noise adds surface roughness on top.
-     * The combined result is mapped to a height in roughly [35, 95].
+     * A medium-frequency hill noise adds distinct hills on top of the
+     * continental base.  A higher-frequency detail noise adds surface
+     * roughness.  The combined result is mapped to a height in roughly [30, 100].
      */
     public int getTerrainHeight(int wx, int wz) {
         // Continental shape: large slow waves → tanh shapes transitions between elevations.
-        // A lower steepness factor (1.6 vs the previous 2.8) creates more gradual slopes
-        // instead of near-vertical cliff faces.
         double continental = noise.octaveNoise(wx * 0.003, wz * 0.003, 3, 0.5, 2.0);
         double steep = Math.tanh(continental * 1.6);
-        // Fine surface detail layered on top — extra octave and amplitude help break up
-        // any remaining sharp edges with natural-looking roughness.
-        double detail = noise.octaveNoise(wx * 0.020, wz * 0.020, 4, 0.45, 2.0) * 0.22;
-        double h = 65.0 + (steep + detail) * 25.0;
+        // Medium-frequency hill noise adds prominent, distinct hills.
+        double hills = noise.octaveNoise(wx * 0.008, wz * 0.008, 2, 0.5, 2.0) * 0.4;
+        // Fine surface detail layered on top.
+        double detail = noise.octaveNoise(wx * 0.020, wz * 0.020, 4, 0.45, 2.0) * 0.15;
+        double h = 65.0 + (steep + hills + detail) * 30.0;
         return (int) Math.max(2, h);
     }
 

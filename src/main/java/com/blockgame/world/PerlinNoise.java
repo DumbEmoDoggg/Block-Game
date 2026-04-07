@@ -86,6 +86,62 @@ public final class PerlinNoise {
     }
 
     /**
+     * Returns a single-octave 3-D noise value in [-1, 1] for the given (x, y, z) position.
+     */
+    public double noise3(double x, double y, double z) {
+        int X = (int) Math.floor(x) & 255;
+        int Y = (int) Math.floor(y) & 255;
+        int Z = (int) Math.floor(z) & 255;
+
+        double xf = x - Math.floor(x);
+        double yf = y - Math.floor(y);
+        double zf = z - Math.floor(z);
+
+        double u = fade(xf);
+        double v = fade(yf);
+        double w = fade(zf);
+
+        int A  = p[X]   + Y;
+        int AA = p[A]   + Z;
+        int AB = p[A+1] + Z;
+        int B  = p[X+1] + Y;
+        int BA = p[B]   + Z;
+        int BB = p[B+1] + Z;
+
+        return lerp(w,
+            lerp(v,
+                lerp(u, grad3(p[AA],   xf,   yf,   zf),
+                        grad3(p[BA],   xf-1, yf,   zf)),
+                lerp(u, grad3(p[AB],   xf,   yf-1, zf),
+                        grad3(p[BB],   xf-1, yf-1, zf))),
+            lerp(v,
+                lerp(u, grad3(p[AA+1], xf,   yf,   zf-1),
+                        grad3(p[BA+1], xf-1, yf,   zf-1)),
+                lerp(u, grad3(p[AB+1], xf,   yf-1, zf-1),
+                        grad3(p[BB+1], xf-1, yf-1, zf-1))));
+    }
+
+    /**
+     * Combines {@code octaves} layers of 3-D noise (fBm).
+     * Returns a value roughly in [-1, 1].
+     */
+    public double octaveNoise3(double x, double y, double z, int octaves,
+                               double persistence, double lacunarity) {
+        double value     = 0.0;
+        double amplitude = 1.0;
+        double frequency = 1.0;
+        double maxValue  = 0.0;
+
+        for (int i = 0; i < octaves; i++) {
+            value    += noise3(x * frequency, y * frequency, z * frequency) * amplitude;
+            maxValue += amplitude;
+            amplitude *= persistence;
+            frequency *= lacunarity;
+        }
+        return value / maxValue;
+    }
+
+    /**
      * Combines {@code octaves} layers of noise (fBm) with the given
      * {@code persistence} (amplitude decay per octave) and {@code lacunarity}
      * (frequency multiplier per octave).  Returns a value roughly in [-1, 1].
@@ -127,6 +183,17 @@ public final class PerlinNoise {
         int h = hash & 7;
         double u = (h < 4) ? x : z;
         double v = (h < 4) ? z : x;
+        return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+    }
+
+    /**
+     * 3-D gradient function.  Uses the low 4 bits of {@code hash} to select one
+     * of twelve unit-cube edge vectors.
+     */
+    private static double grad3(int hash, double x, double y, double z) {
+        int h = hash & 15;
+        double u = h < 8 ? x : y;
+        double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
         return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
     }
 }
