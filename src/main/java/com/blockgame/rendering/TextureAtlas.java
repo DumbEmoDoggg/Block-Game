@@ -565,6 +565,11 @@ public class TextureAtlas {
         for (int i = 0; i < 10; i++) {
             setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 18, 70, 10);
         }
+        // Fully-transparent "gap" pixels – simulate spaces between leaves.
+        // The fragment shader discards pixels with alpha < 0.5, making gaps see-through.
+        for (int i = 0; i < 30; i++) {
+            img.setRGB(rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 0x00000000);
+        }
         return img;
     }
 

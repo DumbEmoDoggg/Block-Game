@@ -515,6 +515,10 @@ public class Renderer {
      * Fills {@code fb} with icon quad vertex data.
      * Each slot gets a quad slightly inset from the slot background, textured
      * with the corresponding block's icon from the icon atlas.
+     *
+     * <p>The icon width in NDC is scaled by the inverse of the viewport aspect
+     * ratio so that the icon renders as a square in screen pixels regardless of
+     * the window dimensions.
      */
     private void fillIconBuffer(FloatBuffer fb) {
         BlockType[] hotbar = player.getHotbar();
@@ -526,11 +530,20 @@ public class Renderer {
         float startX   = -totalW / 2f;
         float bottomY  = -0.92f;
 
+        // Correct for viewport aspect ratio so the icon is square in screen pixels.
+        // NDC x covers viewportW pixels, NDC y covers viewportH pixels, so to
+        // match the pixel height of the icon we scale the NDC width by H/W.
+        float aspect   = (viewportW > 0 && viewportH > 0)
+                         ? (float) viewportW / viewportH : 1.0f;
+        float iconNdcH = slotSize - 2 * inset;
+        float iconNdcW = iconNdcH / aspect; // same pixel size as height
+
         for (int i = 0; i < HOTBAR_SLOTS; i++) {
-            float x0 = startX + i * (slotSize + gap) + inset;
-            float x1 = x0 + slotSize - 2 * inset;
+            float slotCenterX = startX + i * (slotSize + gap) + slotSize / 2f;
+            float x0 = slotCenterX - iconNdcW / 2f;
+            float x1 = slotCenterX + iconNdcW / 2f;
             float y0 = bottomY + inset;
-            float y1 = y0 + slotSize - 2 * inset;
+            float y1 = y0 + iconNdcH;
 
             int iconIdx = TextureAtlas.getIconIndex(hotbar[i]);
             float[] uv;
