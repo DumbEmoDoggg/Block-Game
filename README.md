@@ -55,17 +55,25 @@ Artefacts produced in `target/`:
 |---|---|
 | `block-game-1.0.0-fat.jar` | Self-contained JAR (all native libraries included) |
 | `BlockGame.exe` | Windows executable wrapper — requires Java 17+ on the target machine |
+| `BlockGame/` | Self-contained app image — includes a bundled JRE, **no Java install required** |
 
 ---
 
 ## Running
+
+**Self-contained bundle (no Java required):**
+
+Download and extract the `BlockGame-windows-bundled` artifact (from the CI), then run:
+```
+BlockGame\BlockGame.exe
+```
 
 **Cross-platform (fat JAR):**
 ```bash
 java -jar target/block-game-1.0.0-fat.jar
 ```
 
-**Windows:**
+**Windows (requires Java 17+):**
 Double-click `BlockGame.exe` (Java 17 or later must be installed and on the `PATH` or `JAVA_HOME`).
 
 ---

@@ -31,3 +31,10 @@ jobs:
           name: BlockGame-windows
           path: target/BlockGame.exe
           if-no-files-found: error
+
+      - name: Upload self-contained bundle (no Java required)
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockGame-windows-bundled
+          path: target/BlockGame/
+          if-no-files-found: error
