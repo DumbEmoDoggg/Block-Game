@@ -43,6 +43,7 @@ public class Renderer {
 
     private Shader worldShader;
     private Shader hudShader;
+    private Shader highlightShader;
     private TextureAtlas textureAtlas;
 
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
@@ -53,6 +54,10 @@ public class Renderer {
     // Hotbar quad geometry
     private int hotbarVao, hotbarVbo;
     private static final int HOTBAR_SLOTS = 7;
+
+    // Block-face highlight geometry
+    private int highlightVao, highlightVbo;
+    private final FloatBuffer highlightBuf = BufferUtils.createFloatBuffer(6 * 3);
 
     private int viewportW, viewportH;
 
@@ -75,10 +80,12 @@ public class Renderer {
 
         worldShader = new Shader("shaders/vertex.glsl",             "shaders/fragment.glsl");
         hudShader   = new Shader("shaders/hud_vertex.glsl",  "shaders/hud_fragment.glsl");
+        highlightShader = new Shader("shaders/highlight_vertex.glsl", "shaders/highlight_fragment.glsl");
         textureAtlas = new TextureAtlas();
 
         buildCrosshair();
         buildHotbar();
+        buildHighlight();
 
         // Read initial framebuffer size
         IntBuffer w = BufferUtils.createIntBuffer(1);
@@ -109,6 +116,7 @@ public class Renderer {
 
         rebuildDirtyMeshes();
         renderWorld();
+        renderHighlight();
         renderHud();
     }
 
@@ -148,6 +156,89 @@ public class Renderer {
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Block-face highlight pass
+    // -------------------------------------------------------------------------
+
+    private void buildHighlight() {
+        highlightVao = glGenVertexArrays();
+        highlightVbo = glGenBuffers();
+
+        glBindVertexArray(highlightVao);
+        glBindBuffer(GL_ARRAY_BUFFER, highlightVbo);
+
+        // Allocate space for one face: 6 vertices × 3 floats each (highlightBuf is pre-allocated)
+        glBufferData(GL_ARRAY_BUFFER, highlightBuf, GL_DYNAMIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * Float.BYTES, 0L);
+        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    private void renderHighlight() {
+        int[] block  = player.getTargetedBlock();
+        int[] normal = player.getTargetedFaceNormal();
+        if (block == null || normal == null) return;
+
+        float[] verts = buildHighlightFace(block[0], block[1], block[2],
+                                           normal[0], normal[1], normal[2]);
+
+        highlightBuf.clear();
+        highlightBuf.put(verts).flip();
+
+        glBindBuffer(GL_ARRAY_BUFFER, highlightVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, highlightBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        highlightShader.use();
+        highlightShader.setMatrix4f("view",       player.getCamera().getViewMatrix());
+        highlightShader.setMatrix4f("projection", player.getCamera().getProjectionMatrix());
+        highlightShader.setFloat("uTime", (float) glfwGetTime());
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-1f, -1f);
+
+        glBindVertexArray(highlightVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glDisable(GL_BLEND);
+    }
+
+    /**
+     * Returns 6 vertex positions (2 triangles) for the given block face,
+     * slightly offset outward along the face normal to avoid z-fighting.
+     */
+    private float[] buildHighlightFace(int bx, int by, int bz, int nx, int ny, int nz) {
+        final float OFF = 0.001f;
+        float ox = nx * OFF, oy = ny * OFF, oz = nz * OFF;
+        float x = bx, y = by, z = bz;
+
+        // 4 corners of the face – winding matches ChunkMesh (CCW from outside)
+        float[][] c;
+        if      (ny ==  1) c = new float[][]{ {x+ox,   y+1+oy, z+oz  }, {x+ox,   y+1+oy, z+1+oz}, {x+1+ox, y+1+oy, z+1+oz}, {x+1+ox, y+1+oy, z+oz  } };
+        else if (ny == -1) c = new float[][]{ {x+ox,   y+oy,   z+oz  }, {x+1+ox, y+oy,   z+oz  }, {x+1+ox, y+oy,   z+1+oz}, {x+ox,   y+oy,   z+1+oz} };
+        else if (nz == -1) c = new float[][]{ {x+ox,   y+oy,   z+oz  }, {x+ox,   y+1+oy, z+oz  }, {x+1+ox, y+1+oy, z+oz  }, {x+1+ox, y+oy,   z+oz  } };
+        else if (nz ==  1) c = new float[][]{ {x+1+ox, y+oy,   z+1+oz}, {x+1+ox, y+1+oy, z+1+oz}, {x+ox,   y+1+oy, z+1+oz}, {x+ox,   y+oy,   z+1+oz} };
+        else if (nx == -1) c = new float[][]{ {x+ox,   y+oy,   z+1+oz}, {x+ox,   y+1+oy, z+1+oz}, {x+ox,   y+1+oy, z+oz  }, {x+ox,   y+oy,   z+oz  } };
+        else               c = new float[][]{ {x+1+ox, y+oy,   z+oz  }, {x+1+ox, y+1+oy, z+oz  }, {x+1+ox, y+1+oy, z+1+oz}, {x+1+ox, y+oy,   z+1+oz} };
+
+        // Emit triangles: 0,1,2 and 0,2,3
+        float[] v = new float[6 * 3];
+        int[] idx = {0, 1, 2, 0, 2, 3};
+        for (int i = 0; i < 6; i++) {
+            v[i*3]   = c[idx[i]][0];
+            v[i*3+1] = c[idx[i]][1];
+            v[i*3+2] = c[idx[i]][2];
+        }
+        return v;
     }
 
     // -------------------------------------------------------------------------
@@ -314,6 +405,7 @@ public class Renderer {
     public void cleanup() {
         worldShader.cleanup();
         hudShader.cleanup();
+        highlightShader.cleanup();
         textureAtlas.cleanup();
 
         for (ChunkMesh m : chunkMeshes.values()) m.cleanup();
@@ -323,5 +415,7 @@ public class Renderer {
         glDeleteBuffers(crosshairVbo);
         glDeleteVertexArrays(hotbarVao);
         glDeleteBuffers(hotbarVbo);
+        glDeleteVertexArrays(highlightVao);
+        glDeleteBuffers(highlightVbo);
     }
 }
