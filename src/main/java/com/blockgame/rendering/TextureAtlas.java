@@ -5,12 +5,19 @@ import org.lwjgl.BufferUtils;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE;
@@ -19,9 +26,11 @@ import static org.lwjgl.opengl.GL30.glGenerateMipmap;
 /**
  * Builds and uploads a block texture atlas to the GPU.
  *
- * <p>Each tile is loaded from {@code textures/<name>.png} on the classpath
- * (e.g. {@code src/main/resources/textures/dirt.png}).  If a PNG is missing
- * or cannot be decoded, the tile falls back to a procedurally generated image.
+ * <p>Each tile is loaded from {@code textures/<name>.png} on the classpath.
+ * The mapping from tile key to PNG filename is read from
+ * {@code textures/block_textures.json} at startup, so textures can be
+ * remapped simply by editing that file.  If a PNG is missing or cannot be
+ * decoded, the tile falls back to a procedurally generated image.
  *
  * <p>The atlas is a grid of {@value #TILE_SIZE}×{@value #TILE_SIZE} pixel tiles
  * arranged in {@value #ATLAS_COLS} columns and {@value #ATLAS_ROWS} rows.
@@ -57,6 +66,9 @@ public class TextureAtlas {
     public static final int TILE_SNOW       = 8;
 
     private final int textureId;
+
+    /** Tile-key → PNG filename (without extension), loaded from block_textures.json. */
+    private static final Map<String, String> TEXTURE_MAP = loadTextureMap();
 
     // -------------------------------------------------------------------------
     // Construction
@@ -126,17 +138,72 @@ public class TextureAtlas {
     private BufferedImage buildAtlas() {
         BufferedImage img = new BufferedImage(ATLAS_W, ATLAS_H, BufferedImage.TYPE_INT_ARGB);
 
-        drawTile(img, TILE_GRASS_TOP,  loadTile("grass_top",  () -> grassTop()));
-        drawTile(img, TILE_GRASS_SIDE, loadTile("grass_side", () -> grassSide()));
-        drawTile(img, TILE_DIRT,       loadTile("dirt",       () -> dirt()));
-        drawTile(img, TILE_STONE,      loadTile("stone",      () -> stone()));
-        drawTile(img, TILE_WOOD_TOP,   loadTile("wood_top",   () -> woodTop()));
-        drawTile(img, TILE_WOOD_SIDE,  loadTile("wood_side",  () -> woodSide()));
-        drawTile(img, TILE_LEAVES,     loadTile("leaves",     () -> leaves()));
-        drawTile(img, TILE_SAND,       loadTile("sand",       () -> sand()));
-        drawTile(img, TILE_SNOW,       loadTile("snow",       () -> snow()));
+        drawTile(img, TILE_GRASS_TOP,  loadTile(textureName("grass_top"),  () -> grassTop()));
+        drawTile(img, TILE_GRASS_SIDE, loadTile(textureName("grass_side"), () -> grassSide()));
+        drawTile(img, TILE_DIRT,       loadTile(textureName("dirt"),       () -> dirt()));
+        drawTile(img, TILE_STONE,      loadTile(textureName("stone"),      () -> stone()));
+        drawTile(img, TILE_WOOD_TOP,   loadTile(textureName("wood_top"),   () -> woodTop()));
+        drawTile(img, TILE_WOOD_SIDE,  loadTile(textureName("wood_side"),  () -> woodSide()));
+        drawTile(img, TILE_LEAVES,     loadTile(textureName("leaves"),     () -> leaves()));
+        drawTile(img, TILE_SAND,       loadTile(textureName("sand"),       () -> sand()));
+        drawTile(img, TILE_SNOW,       loadTile(textureName("snow"),       () -> snow()));
 
         return img;
+    }
+
+    /**
+     * Returns the PNG filename (without extension) for the given tile key,
+     * falling back to the key itself when the key is absent from the map.
+     */
+    private static String textureName(String key) {
+        return TEXTURE_MAP.getOrDefault(key, key);
+    }
+
+    /**
+     * Reads {@code textures/block_textures.json} from the classpath and returns
+     * a map of tile-key → PNG filename (without extension).
+     *
+     * <p>The file is a simple flat JSON object, e.g.:
+     * <pre>
+     * {
+     *   "grass_top": "grass_block_top",
+     *   "dirt":      "dirt"
+     * }
+     * </pre>
+     * If the file is missing or malformed the map is empty, causing each tile
+     * to fall back to the procedural generator.
+     *
+     * <p>Parsing uses a simple regex rather than a full JSON library because
+     * the file is a flat string-to-string object with no nesting, and adding
+     * an external JSON dependency would be disproportionate for this use case.
+     * Keys and values must not contain escaped quotes.
+     */
+    private static Map<String, String> loadTextureMap() {
+        Map<String, String> map = new HashMap<>();
+        String path = "/textures/block_textures.json";
+        try (InputStream in = TextureAtlas.class.getResourceAsStream(path)) {
+            if (in == null) {
+                LOGGER.warning("block_textures.json not found on classpath; using procedural fallbacks.");
+                return map;
+            }
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+            }
+            // Parse flat JSON object: "key" : "value" pairs (no nesting required)
+            Pattern pair = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]+)\"");
+            Matcher m = pair.matcher(sb.toString());
+            while (m.find()) {
+                map.put(m.group(1), m.group(2));
+            }
+            LOGGER.info("Loaded " + map.size() + " texture mappings from " + path);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to read " + path, e);
+        }
+        return map;
     }
 
     /**

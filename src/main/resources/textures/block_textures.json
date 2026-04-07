@@ -1,0 +1,11 @@
+{
+  "grass_top":  "grass_block_top",
+  "grass_side": "grass_block_side",
+  "dirt":       "dirt",
+  "stone":      "stone",
+  "wood_top":   "oak_log_top",
+  "wood_side":  "oak_log",
+  "leaves":     "oak_leaves",
+  "sand":       "sand",
+  "snow":       "snow"
+}
