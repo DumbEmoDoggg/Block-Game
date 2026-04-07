@@ -17,9 +17,9 @@ import static org.lwjgl.opengl.GL30.*;
 /**
  * Builds and renders the triangle mesh for a single {@link Chunk}.
  *
- * <p>Vertex layout (9 floats per vertex):
+ * <p>Vertex layout (10 floats per vertex):
  * <pre>
- *   position (3) | color (3) | normal (3)
+ *   position (3) | color (3) | normal (3) | skyLight (1)
  * </pre>
  *
  * <p>Only the visible faces of solid blocks are emitted (faces shared with
@@ -29,7 +29,7 @@ import static org.lwjgl.opengl.GL30.*;
  */
 public class ChunkMesh {
 
-    private static final int FLOATS_PER_VERTEX = 9;
+    private static final int FLOATS_PER_VERTEX = 10;
     private static final int VERTICES_PER_FACE = 6; // 2 triangles × 3 vertices
 
     // Per-face brightness multipliers (simple ambient occlusion approximation)
@@ -62,13 +62,15 @@ public class ChunkMesh {
                     int wx = chunk.getWorldX(lx);
                     int wz = chunk.getWorldZ(lz);
 
+                    float skyLight = computeSkyLight(chunk, lx, ly, lz);
+
                     // Emit a face only when the adjacent block is transparent
-                    if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block);
-                    if (isTransparent(world, chunk, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block);
-                    if (isTransparent(world, chunk, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block);
-                    if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block);
-                    if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block);
-                    if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block);
+                    if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
+                    if (isTransparent(world, chunk, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block, skyLight);
+                    if (isTransparent(world, chunk, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block, skyLight);
+                    if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
+                    if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
+                    if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
                 }
             }
         }
@@ -93,12 +95,28 @@ public class ChunkMesh {
     }
 
     // -------------------------------------------------------------------------
+    // Sky-light computation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns 1.0 if the block column above (lx, ly, lz) is clear all the way
+     * to the top of the chunk (i.e. the block is exposed to skylight), or 0.0
+     * if any solid block sits above it (i.e. the block is underground/in a cave).
+     */
+    private float computeSkyLight(Chunk chunk, int lx, int ly, int lz) {
+        for (int y = ly + 1; y < Chunk.HEIGHT; y++) {
+            if (!chunk.getBlock(lx, y, lz).isTransparent()) return 0.0f;
+        }
+        return 1.0f;
+    }
+
+    // -------------------------------------------------------------------------
     // Face geometry
     // -------------------------------------------------------------------------
 
     private enum Face { TOP, BOTTOM, NORTH, SOUTH, WEST, EAST }
 
-    private void addFace(List<Float> buf, int x, int y, int z, Face face, BlockType block) {
+    private void addFace(List<Float> buf, int x, int y, int z, Face face, BlockType block, float skyLight) {
         float br, bg, bb;   // base color
         float bright;
 
@@ -139,6 +157,7 @@ public class ChunkMesh {
             buf.add(quad[i * 3 + 2]);
             buf.add(r); buf.add(g); buf.add(b);
             buf.add(normal[0]); buf.add(normal[1]); buf.add(normal[2]);
+            buf.add(skyLight);
         }
     }
 
@@ -192,6 +211,8 @@ public class ChunkMesh {
         glEnableVertexAttribArray(1);
         glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 6L * Float.BYTES);
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 1, GL_FLOAT, false, stride, 9L * Float.BYTES);
+        glEnableVertexAttribArray(3);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
