@@ -3,16 +3,25 @@ package com.blockgame.rendering;
 import com.blockgame.world.BlockType;
 import org.lwjgl.BufferUtils;
 
+import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE;
 import static org.lwjgl.opengl.GL30.glGenerateMipmap;
 
 /**
- * Procedurally generates and uploads a block texture atlas to the GPU.
+ * Builds and uploads a block texture atlas to the GPU.
+ *
+ * <p>Each tile is loaded from {@code textures/<name>.png} on the classpath
+ * (e.g. {@code src/main/resources/textures/dirt.png}).  If a PNG is missing
+ * or cannot be decoded, the tile falls back to a procedurally generated image.
  *
  * <p>The atlas is a grid of {@value #TILE_SIZE}×{@value #TILE_SIZE} pixel tiles
  * arranged in {@value #ATLAS_COLS} columns and {@value #ATLAS_ROWS} rows.
@@ -23,6 +32,8 @@ import static org.lwjgl.opengl.GL30.glGenerateMipmap;
  * block face to its tile.
  */
 public class TextureAtlas {
+
+    private static final Logger LOGGER = Logger.getLogger(TextureAtlas.class.getName());
 
     // -------------------------------------------------------------------------
     // Atlas layout
@@ -115,17 +126,45 @@ public class TextureAtlas {
     private BufferedImage buildAtlas() {
         BufferedImage img = new BufferedImage(ATLAS_W, ATLAS_H, BufferedImage.TYPE_INT_ARGB);
 
-        drawTile(img, TILE_GRASS_TOP,  grassTop());
-        drawTile(img, TILE_GRASS_SIDE, grassSide());
-        drawTile(img, TILE_DIRT,       dirt());
-        drawTile(img, TILE_STONE,      stone());
-        drawTile(img, TILE_WOOD_TOP,   woodTop());
-        drawTile(img, TILE_WOOD_SIDE,  woodSide());
-        drawTile(img, TILE_LEAVES,     leaves());
-        drawTile(img, TILE_SAND,       sand());
-        drawTile(img, TILE_SNOW,       snow());
+        drawTile(img, TILE_GRASS_TOP,  loadTile("grass_top",  () -> grassTop()));
+        drawTile(img, TILE_GRASS_SIDE, loadTile("grass_side", () -> grassSide()));
+        drawTile(img, TILE_DIRT,       loadTile("dirt",       () -> dirt()));
+        drawTile(img, TILE_STONE,      loadTile("stone",      () -> stone()));
+        drawTile(img, TILE_WOOD_TOP,   loadTile("wood_top",   () -> woodTop()));
+        drawTile(img, TILE_WOOD_SIDE,  loadTile("wood_side",  () -> woodSide()));
+        drawTile(img, TILE_LEAVES,     loadTile("leaves",     () -> leaves()));
+        drawTile(img, TILE_SAND,       loadTile("sand",       () -> sand()));
+        drawTile(img, TILE_SNOW,       loadTile("snow",       () -> snow()));
 
         return img;
+    }
+
+    /**
+     * Loads a 16×16 tile image from {@code textures/<name>.png} on the classpath.
+     * Falls back to the supplied procedural generator if the resource is missing or unreadable.
+     */
+    private static BufferedImage loadTile(String name, java.util.function.Supplier<BufferedImage> fallback) {
+        String path = "/textures/" + name + ".png";
+        try (InputStream in = TextureAtlas.class.getResourceAsStream(path)) {
+            if (in != null) {
+                BufferedImage src = ImageIO.read(in);
+                if (src != null) {
+                    // Ensure the image is in ARGB format and scaled to TILE_SIZE × TILE_SIZE
+                    BufferedImage tile = new BufferedImage(TILE_SIZE, TILE_SIZE, BufferedImage.TYPE_INT_ARGB);
+                    java.awt.Graphics g = tile.getGraphics();
+                    try {
+                        g.drawImage(src, 0, 0, TILE_SIZE, TILE_SIZE, null);
+                    } finally {
+                        g.dispose();
+                    }
+                    return tile;
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to load texture: " + path, e);
+        }
+        LOGGER.info("Texture not found, using procedural fallback: " + path);
+        return fallback.get();
     }
 
     /** Copies a tile image into the atlas at the position corresponding to {@code tileId}. */
