@@ -58,7 +58,7 @@ class WorldTest {
     }
 
     @Test
-    void chunksBecomesDirtyOnBorderSet() {
+    void chunkBecomesDirtyOnBorderSet() {
         World world = new World();
         // Force load adjacent chunks
         world.getOrLoadChunk(0, 0);

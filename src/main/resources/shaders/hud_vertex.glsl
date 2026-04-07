@@ -1,6 +1,6 @@
 #version 330 core
 
-// 2-D position in NDC (Normalised Device Coordinates, range [-1,+1])
+// 2-D position in NDC (Normalized Device Coordinates, range [-1,+1])
 layout (location = 0) in vec2 aPosition;
 // Optional per-vertex color (used by hotbar quads; crosshair ignores it)
 layout (location = 1) in vec3 aColor;
