@@ -3,12 +3,16 @@
 in vec2 vTexCoord;
 in vec3 vNormal;
 in float vSkyLight;
+in float vFogDist;
 
 out vec4 fragColor;
 
 uniform sampler2D uTexture;
 uniform vec3  lightDir;         // normalised world-space direction toward the sun (points away from blocks)
 uniform float ambientStrength;  // [0..1] minimum sky-light level
+uniform vec3  uFogColor;        // sky/background colour to blend into at distance
+uniform float uFogStart;        // distance at which fog begins
+uniform float uFogEnd;          // distance at which fog is fully opaque
 
 // Per-face brightness multipliers baked into the lighting calculation
 // (top = 1.0, north/south = 0.8, east/west = 0.65, bottom = 0.5)
@@ -28,5 +32,11 @@ void main() {
     // Mix between a very dim cave ambient and full sky lighting accordingly.
     float light = mix(CAVE_LIGHT, skyLight, vSkyLight);
 
-    fragColor = vec4(texColor.rgb * light, texColor.a);
+    vec3 lit = texColor.rgb * light;
+
+    // Distance fog: linearly blend toward sky colour beyond uFogStart
+    float fogFactor = clamp((vFogDist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
+    vec3  finalRgb  = mix(lit, uFogColor, fogFactor);
+
+    fragColor = vec4(finalRgb, texColor.a);
 }

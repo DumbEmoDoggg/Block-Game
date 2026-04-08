@@ -8,14 +8,17 @@ layout (location = 3) in float aSkyLight;
 out vec2 vTexCoord;
 out vec3 vNormal;
 out float vSkyLight;
+out float vFogDist;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
 void main() {
-    gl_Position = projection * view * model * vec4(aPosition, 1.0);
+    vec4 eyePos = view * model * vec4(aPosition, 1.0);
+    gl_Position = projection * eyePos;
     vTexCoord = aTexCoord;
     vNormal   = aNormal;
     vSkyLight = aSkyLight;
+    vFogDist  = length(eyePos.xyz);
 }
