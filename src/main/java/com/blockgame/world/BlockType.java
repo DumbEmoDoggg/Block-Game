@@ -24,15 +24,16 @@ public enum BlockType {
     STONE    (3,  0.60f, 0.60f, 0.60f, true,  false),
     WOOD     (4,  0.55f, 0.38f, 0.18f, true,  false),
     LEAVES   (5,  0.15f, 0.55f, 0.15f, true,  true),
-    SAND     (6,  0.90f, 0.80f, 0.50f, true,  false),
+    /** Falls under gravity into any non-solid block (air, water, etc.). */
+    SAND     (6,  0.90f, 0.80f, 0.50f, true,  false, new FallingBlockBehavior()),
     SNOW     (7,  0.95f, 0.95f, 0.98f, true,  false),
     PLANKS   (8,  0.80f, 0.55f, 0.28f, true,  false),
     /** Still water – non-solid (passable) and transparent so adjacent faces are rendered. */
     WATER    (9,  0.25f, 0.46f, 0.89f, false, true,  new WaterBehavior()),
     /** Unbreakable foundation layer at the bottom of the world. */
     BEDROCK  (10, 0.18f, 0.18f, 0.18f, true,  false, null, false),
-    /** Loose stone aggregate found underground and on underwater floors. */
-    GRAVEL   (11, 0.50f, 0.48f, 0.45f, true,  false),
+    /** Loose stone aggregate found underground and on underwater floors; falls under gravity. */
+    GRAVEL   (11, 0.50f, 0.48f, 0.45f, true,  false, new FallingBlockBehavior()),
     /** Stone with black coal seams. */
     COAL_ORE (12, 0.42f, 0.42f, 0.42f, true,  false),
     /** Stone with rusty iron inclusions. */
