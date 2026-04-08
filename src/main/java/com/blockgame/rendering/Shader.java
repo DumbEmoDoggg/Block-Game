@@ -73,6 +73,10 @@ public class Shader {
         glUniform1i(location(name), v);
     }
 
+    public void setVector4f(String name, float x, float y, float z, float w) {
+        glUniform4f(location(name), x, y, z, w);
+    }
+
     public void cleanup() {
         glDeleteProgram(programId);
     }
