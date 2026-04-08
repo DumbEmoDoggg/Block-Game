@@ -26,15 +26,32 @@ import static org.lwjgl.opengl.GL30.*;
  * another solid block are culled).  Face brightness is applied in the shader
  * using pre-baked per-face multipliers: top = 100 %, north/south = 80 %,
  * east/west = 65 %, bottom = 50 %.
+ *
+ * <p>Water faces are built into a separate VAO/VBO ({@code waterVao}/{@code waterVbo})
+ * so they can be rendered in a dedicated transparent pass.  A water face is only
+ * emitted when the adjacent block is transparent <em>and</em> not water (i.e. at
+ * water–air boundaries, never at water–water boundaries).
  */
 public class ChunkMesh {
 
     private static final int FLOATS_PER_VERTEX = 9;
     private static final int VERTICES_PER_FACE = 6; // 2 triangles × 3 vertices
 
+    // Solid-block mesh
     private int vao = 0;
     private int vbo = 0;
     private int vertexCount = 0;
+
+    // Water-face mesh (rendered separately with alpha blending)
+    private int waterVao = 0;
+    private int waterVbo = 0;
+    private int waterVertexCount = 0;
+
+    /**
+     * UV V-range for one animation frame inside water_still.png (16 px / 512 px).
+     * The water fragment shader advances through frames by offsetting V at runtime.
+     */
+    private static final float WATER_FRAME_V = 1.0f / 32.0f;
 
     // -------------------------------------------------------------------------
     // Mesh generation
@@ -77,7 +94,8 @@ public class ChunkMesh {
     // -------------------------------------------------------------------------
 
     private void buildFull(Chunk chunk, World world) {
-        List<Float> buf = new ArrayList<>(4096);
+        List<Float> buf      = new ArrayList<>(4096);
+        List<Float> waterBuf = new ArrayList<>(512);
 
         // Pre-compute the surface height per column so that computeSkyLight can
         // determine depth-from-surface in O(1) rather than scanning upward each time.
@@ -92,27 +110,39 @@ public class ChunkMesh {
             for (int ly = 0; ly < Chunk.HEIGHT; ly++) {
                 for (int lz = 0; lz < Chunk.SIZE; lz++) {
                     BlockType block = chunk.getBlock(lx, ly, lz);
-                    if (!block.solid) continue;
 
                     int wx = chunk.getWorldX(lx);
                     int wz = chunk.getWorldZ(lz);
-
                     float skyLight = computeSkyLight(ly, surfaceHeights[lx][lz]);
 
-                    // Emit a face only when the adjacent block is transparent
-                    if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
-                    if (isTransparent(world, chunk, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block, skyLight);
-                    if (isTransparent(world, chunk, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block, skyLight);
-                    if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
-                    if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
-                    if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
+                    if (block.solid) {
+                        // Emit a solid face only when the adjacent block is transparent
+                        if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
+                        if (isTransparent(world, chunk, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block, skyLight);
+                        if (isTransparent(world, chunk, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block, skyLight);
+                        if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
+                        if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
+                        if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
+                    } else if (block == BlockType.WATER) {
+                        // Emit a water face only at water–air boundaries (never water–water)
+                        if (isOpenForWaterFace(world, chunk, lx, ly + 1, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.TOP,    skyLight);
+                        if (isOpenForWaterFace(world, chunk, lx, ly - 1, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.BOTTOM, skyLight);
+                        if (isOpenForWaterFace(world, chunk, lx, ly, lz - 1)) addWaterFace(waterBuf, wx, ly, wz, Face.NORTH,  skyLight);
+                        if (isOpenForWaterFace(world, chunk, lx, ly, lz + 1)) addWaterFace(waterBuf, wx, ly, wz, Face.SOUTH,  skyLight);
+                        if (isOpenForWaterFace(world, chunk, lx - 1, ly, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.WEST,   skyLight);
+                        if (isOpenForWaterFace(world, chunk, lx + 1, ly, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.EAST,   skyLight);
+                    }
                 }
             }
         }
 
-        float[] data = new float[buf.size()];
-        for (int i = 0; i < buf.size(); i++) data[i] = buf.get(i);
-        upload(data);
+        float[] solidData = new float[buf.size()];
+        for (int i = 0; i < buf.size(); i++) solidData[i] = buf.get(i);
+        upload(solidData);
+
+        float[] wData = new float[waterBuf.size()];
+        for (int i = 0; i < waterBuf.size(); i++) wData[i] = waterBuf.get(i);
+        uploadWater(wData);
     }
 
     // -------------------------------------------------------------------------
@@ -246,6 +276,30 @@ public class ChunkMesh {
         return world.getBlock(wx, ly, wz).isTransparent();
     }
 
+    /**
+     * Returns {@code true} if a water face should be emitted on the side of a
+     * water block facing the block at {@code (lx, ly, lz)}.
+     *
+     * <p>A face is emitted only when the neighbouring block is transparent
+     * <em>and</em> is not itself water – this prevents generating internal
+     * faces at water–water boundaries.
+     */
+    private boolean isOpenForWaterFace(World world, Chunk chunk, int lx, int ly, int lz) {
+        BlockType adj = getBlockAt(world, chunk, lx, ly, lz);
+        return adj.isTransparent() && adj != BlockType.WATER;
+    }
+
+    /** Returns the {@link BlockType} at local chunk position, crossing chunk boundaries via {@code world}. */
+    private BlockType getBlockAt(World world, Chunk chunk, int lx, int ly, int lz) {
+        if (lx >= 0 && lx < Chunk.SIZE && lz >= 0 && lz < Chunk.SIZE
+                && ly >= 0 && ly < Chunk.HEIGHT) {
+            return chunk.getBlock(lx, ly, lz);
+        }
+        int wx = chunk.getWorldX(lx);
+        int wz = chunk.getWorldZ(lz);
+        return world.getBlock(wx, ly, wz);
+    }
+
     // -------------------------------------------------------------------------
     // Sky-light computation
     // -------------------------------------------------------------------------
@@ -306,6 +360,39 @@ public class ChunkMesh {
         float[] normal = normal(face);
 
         // Two triangles: indices 0,1,2 and 0,2,3
+        for (int i : new int[]{0, 1, 2, 0, 2, 3}) {
+            buf.add(quad[i * 3]);
+            buf.add(quad[i * 3 + 1]);
+            buf.add(quad[i * 3 + 2]);
+            buf.add(us[i]); buf.add(vs[i]);
+            buf.add(normal[0]); buf.add(normal[1]); buf.add(normal[2]);
+            buf.add(skyLight);
+        }
+    }
+
+    /**
+     * Emits a water face into {@code buf} using UV coordinates suitable for the
+     * animated water_still texture (U in [0,1], V in [0, 1/32] for one frame).
+     * The water fragment shader advances through frames at runtime using {@code uTime}.
+     */
+    private void addWaterFace(List<Float> buf, int x, int y, int z, Face face, float skyLight) {
+        boolean isSide = face != Face.TOP && face != Face.BOTTOM;
+
+        // One frame of the water sprite sheet: U spans [0,1], V spans [0, WATER_FRAME_V]
+        float u0 = 0f, v0 = 0f, u1 = 1f, v1 = WATER_FRAME_V;
+
+        float[] us, vs;
+        if (!isSide) {
+            us = new float[]{u0, u0, u1, u1};
+            vs = new float[]{v0, v1, v1, v0};
+        } else {
+            us = new float[]{u0, u0, u1, u1};
+            vs = new float[]{v1, v0, v0, v1};
+        }
+
+        float[] quad   = quad(x, y, z, face);
+        float[] normal = normal(face);
+
         for (int i : new int[]{0, 1, 2, 0, 2, 3}) {
             buf.add(quad[i * 3]);
             buf.add(quad[i * 3 + 1]);
@@ -379,6 +466,42 @@ public class ChunkMesh {
         vertexCount = data.length / FLOATS_PER_VERTEX;
     }
 
+    /**
+     * Uploads water face geometry into a dedicated VAO/VBO.
+     * Uses the same vertex layout as the solid mesh.
+     * Must be called <em>after</em> {@link #upload(float[])} because {@code upload}
+     * calls {@link #cleanup()} which also resets the water buffers.
+     */
+    private void uploadWater(float[] data) {
+        // Water buffers are always freed by the preceding cleanup() call in upload()
+        if (data.length == 0) return;
+
+        waterVao = glGenVertexArrays();
+        waterVbo = glGenBuffers();
+
+        glBindVertexArray(waterVao);
+        glBindBuffer(GL_ARRAY_BUFFER, waterVbo);
+
+        FloatBuffer fb = BufferUtils.createFloatBuffer(data.length);
+        fb.put(data).flip();
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
+
+        int stride = FLOATS_PER_VERTEX * Float.BYTES;
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 5L * Float.BYTES);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 1, GL_FLOAT, false, stride, 8L * Float.BYTES);
+        glEnableVertexAttribArray(3);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+
+        waterVertexCount = data.length / FLOATS_PER_VERTEX;
+    }
+
     // -------------------------------------------------------------------------
     // Render & cleanup
     // -------------------------------------------------------------------------
@@ -390,10 +513,21 @@ public class ChunkMesh {
         glBindVertexArray(0);
     }
 
+    /** Renders only the water faces (for the transparent pass). */
+    public void renderWater() {
+        if (waterVao == 0 || waterVertexCount == 0) return;
+        glBindVertexArray(waterVao);
+        glDrawArrays(GL_TRIANGLES, 0, waterVertexCount);
+        glBindVertexArray(0);
+    }
+
     public void cleanup() {
         if (vao != 0) { glDeleteVertexArrays(vao); vao = 0; }
         if (vbo != 0) { glDeleteBuffers(vbo);       vbo = 0; }
         vertexCount = 0;
+        if (waterVao != 0) { glDeleteVertexArrays(waterVao); waterVao = 0; }
+        if (waterVbo != 0) { glDeleteBuffers(waterVbo);       waterVbo = 0; }
+        waterVertexCount = 0;
     }
 
     public boolean isEmpty() { return vertexCount == 0; }

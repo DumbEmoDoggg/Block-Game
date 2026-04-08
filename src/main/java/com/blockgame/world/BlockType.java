@@ -26,7 +26,9 @@ public enum BlockType {
     LEAVES(5, 0.15f, 0.55f, 0.15f, true,  true),
     SAND  (6, 0.90f, 0.80f, 0.50f, true,  false),
     SNOW  (7, 0.95f, 0.95f, 0.98f, true,  false),
-    PLANKS(8, 0.80f, 0.55f, 0.28f, true,  false);
+    PLANKS(8, 0.80f, 0.55f, 0.28f, true,  false),
+    /** Still water – non-solid (passable) and transparent so adjacent faces are rendered. */
+    WATER (9, 0.25f, 0.46f, 0.89f, false, true);
 
     /** Compact id stored in chunk byte arrays. Max 255 types. */
     public final int id;
