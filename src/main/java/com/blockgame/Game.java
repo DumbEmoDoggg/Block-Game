@@ -1,19 +1,29 @@
 package com.blockgame;
 
+import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.player.Player;
 import com.blockgame.rendering.Renderer;
 import com.blockgame.world.World;
-import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryStack;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.IntBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
@@ -22,6 +32,10 @@ import static org.lwjgl.system.MemoryUtil.NULL;
 
 /**
  * Main game class. Manages the GLFW window, game loop, and top-level state.
+ *
+ * <p>The game loop iterates a {@link List} of {@link GameSystem}s each frame,
+ * so new systems (day/night cycle, mob AI, weather, …) can be added in
+ * {@link #init()} without touching the loop itself.
  */
 public class Game {
 
@@ -33,11 +47,20 @@ public class Game {
     private static final Path SAVE_FILE =
         Path.of(System.getProperty("user.home"), ".blockgame", "world.dat");
 
+    /**
+     * Binary save-format version.  Increment whenever the on-disk layout
+     * changes in a backward-incompatible way.
+     */
+    private static final int SAVE_FORMAT_VERSION = 2;
+
     private long window;
     private World world;
     private Player player;
     private Renderer renderer;
     private InputHandler inputHandler;
+
+    /** Ordered list of all active game systems; iterated every frame. */
+    private final List<GameSystem> systems = new ArrayList<>();
 
     private double lastTime;
 
@@ -98,7 +121,7 @@ public class Game {
         // Create OpenGL capabilities
         GL.createCapabilities();
 
-        // Build game objects
+        // Build core game objects
         inputHandler = new InputHandler(window);
         world        = new World();
         player       = new Player(world, inputHandler, (float) WINDOW_WIDTH / WINDOW_HEIGHT);
@@ -107,8 +130,7 @@ public class Game {
         // Restore the last saved world (if one exists)
         if (Files.exists(SAVE_FILE)) {
             try {
-                Vector3f savedPos = world.load(SAVE_FILE);
-                player.setPosition(savedPos.x, savedPos.y, savedPos.z);
+                loadGame(SAVE_FILE);
                 System.out.println("[BlockGame] Save loaded from " + SAVE_FILE);
             } catch (IOException e) {
                 System.err.println("[BlockGame] Could not load save: " + e.getMessage());
@@ -118,12 +140,31 @@ public class Game {
         // Capture mouse cursor
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
-        // Register key events; Escape is handled in the game loop (cursor toggle)
+        // Register key events
         glfwSetKeyCallback(window, (win, key, scancode, action, mods) -> {
             inputHandler.onKey(key, action);
         });
 
         lastTime = glfwGetTime();
+
+        // ---- Register game systems (in update order) ----
+        // Player physics / input
+        systems.add(dt -> player.update(dt));
+
+        // World streaming – needs player position, cleanup clears chunks
+        systems.add(new GameSystem() {
+            @Override public void update(float dt) { world.update(player.getPosition()); }
+            @Override public void cleanup()        { world.cleanup(); }
+        });
+
+        // Rendering – runs last each frame, cleanup frees GPU resources
+        systems.add(new GameSystem() {
+            @Override public void update(float dt) {
+                renderer.render();
+                glfwSwapBuffers(window);
+            }
+            @Override public void cleanup() { renderer.cleanup(); }
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -142,7 +183,7 @@ public class Game {
             glfwPollEvents();
 
             // Escape toggles cursor capture (first-person look vs. free cursor)
-            if (inputHandler.isKeyJustPressed(GLFW_KEY_ESCAPE)) {
+            if (inputHandler.isActionJustPressed(InputAction.TOGGLE_CURSOR)) {
                 cursorCaptured = !cursorCaptured;
                 glfwSetInputMode(window, GLFW_CURSOR,
                     cursorCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -150,20 +191,18 @@ public class Game {
             }
 
             // Save world when Enter is pressed
-            if (inputHandler.isKeyJustPressed(GLFW_KEY_ENTER)) {
+            if (inputHandler.isActionJustPressed(InputAction.SAVE_WORLD)) {
                 try {
-                    world.save(SAVE_FILE, player.getPosition());
+                    saveGame(SAVE_FILE);
                     System.out.println("[BlockGame] World saved to " + SAVE_FILE);
                 } catch (IOException e) {
                     System.err.println("[BlockGame] Could not save world: " + e.getMessage());
                 }
             }
 
-            player.update(dt);
-            world.update(player.getPosition());
-
-            renderer.render();
-            glfwSwapBuffers(window);
+            for (GameSystem system : systems) {
+                system.update(dt);
+            }
 
             inputHandler.endFrame();
         }
@@ -174,8 +213,10 @@ public class Game {
     // -------------------------------------------------------------------------
 
     private void cleanup() {
-        renderer.cleanup();
-        world.cleanup();
+        // Clean up systems in reverse registration order
+        for (int i = systems.size() - 1; i >= 0; i--) {
+            systems.get(i).cleanup();
+        }
 
         glfwFreeCallbacks(window);
         glfwDestroyWindow(window);
@@ -185,4 +226,90 @@ public class Game {
             cb.free();
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Save / Load  (versioned, tagged-section format)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Writes a versioned save file containing one tagged section per
+     * {@link Saveable} component.
+     *
+     * <p>Format:
+     * <pre>
+     *   int     SAVE_FORMAT_VERSION
+     *   section*:
+     *     UTF   key          (e.g. "world", "player")
+     *     int   dataLength   (bytes in the section payload)
+     *     byte[dataLength]   section payload
+     *   UTF     ""           (empty-string end marker)
+     * </pre>
+     *
+     * @param file destination file (parent directories are created if absent)
+     * @throws IOException on any I/O error
+     */
+    private void saveGame(Path file) throws IOException {
+        Files.createDirectories(file.getParent());
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(Files.newOutputStream(file)))) {
+            out.writeInt(SAVE_FORMAT_VERSION);
+            writeSection(out, "world",  world);
+            writeSection(out, "player", player);
+            out.writeUTF(""); // end marker
+        }
+    }
+
+    /**
+     * Reads a save file written by {@link #saveGame}.  Unknown section keys
+     * are skipped so that saves written by a newer version can be read by an
+     * older build without error.
+     *
+     * @param file source file
+     * @throws IOException if the version header is unrecognised or on any I/O error
+     */
+    private void loadGame(Path file) throws IOException {
+        try (DataInputStream in = new DataInputStream(
+                new BufferedInputStream(Files.newInputStream(file)))) {
+            int version = in.readInt();
+            if (version != SAVE_FORMAT_VERSION) {
+                throw new IOException(
+                    "Unsupported save format version " + version
+                    + " (expected " + SAVE_FORMAT_VERSION + ")");
+            }
+
+            // Build a map of known section handlers
+            Map<String, Saveable> handlers = new LinkedHashMap<>();
+            handlers.put("world",  world);
+            handlers.put("player", player);
+
+            String key;
+            while (!(key = in.readUTF()).isEmpty()) {
+                int length = in.readInt();
+                Saveable handler = handlers.get(key);
+                if (handler != null) {
+                    byte[] data = new byte[length];
+                    in.readFully(data);
+                    handler.load(new DataInputStream(new ByteArrayInputStream(data)));
+                } else {
+                    // Unknown section – skip gracefully
+                    in.skipBytes(length);
+                }
+            }
+        }
+    }
+
+    /**
+     * Serialises {@code saveable} into a length-prefixed section and appends
+     * it to {@code out}.
+     */
+    private static void writeSection(DataOutputStream out, String key, Saveable saveable)
+            throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        saveable.save(new DataOutputStream(buf));
+        byte[] data = buf.toByteArray();
+        out.writeUTF(key);
+        out.writeInt(data.length);
+        out.write(data);
+    }
 }
+
