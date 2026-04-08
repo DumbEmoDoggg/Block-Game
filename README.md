@@ -67,11 +67,12 @@ Artefacts produced in `target/`:
 
 The easiest way to play.  Download **once**, and the launcher keeps your game up to date automatically — no need to re-download the artifact after every update.
 
-1. Download `BlockGameLauncher.bat` and `BlockGameLauncher.ps1` from the [**latest-build** release](https://github.com/DumbEmoDoggg/Block-Game/releases/tag/latest-build) into the same folder.
+1. Download `BlockGameLauncher.bat` from the [**latest-build** release](https://github.com/DumbEmoDoggg/Block-Game/releases/tag/latest-build) into any folder (even one with spaces in the path).
 2. Double-click `BlockGameLauncher.bat`.
-   * On first run the game is downloaded automatically into a `BlockGame\` sub-folder.
+   * If `BlockGameLauncher.ps1` is not in the same folder it is downloaded automatically.
+   * On first run the game is downloaded into a `BlockGame\` sub-folder.
    * On subsequent runs the launcher checks for a newer build; if one exists it is downloaded before the game starts.
-3. That's it — the game launches automatically.
+3. A launcher window opens showing download progress.  Click **Play** when it is ready.
 
 > **Requirements:** Windows 10 or later (PowerShell 5.1 is built in).  The game bundle includes its own JRE so no Java install is needed.
 
