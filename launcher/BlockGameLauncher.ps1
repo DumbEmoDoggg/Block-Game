@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Block Game Launcher – checks for updates from GitHub Releases and launches the game.
+    Block Game Launcher - checks for updates from GitHub Releases and launches the game.
 
 .DESCRIPTION
     Place BlockGameLauncher.bat (or this script) in any folder.
@@ -9,7 +9,7 @@
     On every subsequent run it checks for a newer release and downloads it only when
     one is available.  Then it starts BlockGame\BlockGame.exe.
 
-    No Java installation is required – the downloaded bundle contains a bundled JRE.
+    No Java installation is required - the downloaded bundle contains a bundled JRE.
 
 .NOTES
     Repository  : https://github.com/DumbEmoDoggg/Block-Game
@@ -19,7 +19,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# -- Configuration ------------------------------------------------------------
 $REPO          = 'DumbEmoDoggg/Block-Game'
 $RELEASE_TAG   = 'latest-build'
 $BUNDLE_ASSET  = 'BlockGame-windows-bundled.zip'
@@ -30,7 +30,7 @@ $GameDir       = Join-Path $LauncherDir 'BlockGame'
 $GameExe       = Join-Path $GameDir     'BlockGame.exe'
 $LocalVerFile  = Join-Path $LauncherDir 'game-version.txt'
 $TempZip       = Join-Path $LauncherDir 'BlockGame-update.zip'
-# ──────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 function Write-Status([string]$msg) {
     Write-Host "[Launcher] $msg"
@@ -66,7 +66,7 @@ function Get-LocalVersion {
 }
 
 function Invoke-Download([string]$url, [string]$dest) {
-    Write-Status "Downloading update…"
+    Write-Status "Downloading update..."
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add('User-Agent', 'BlockGame-Launcher')
 
@@ -92,7 +92,7 @@ function Invoke-Download([string]$url, [string]$dest) {
 }
 
 function Expand-Bundle([string]$zipPath) {
-    Write-Status "Extracting update…"
+    Write-Status "Extracting update..."
     # Remove old game folder so stale files do not linger
     if (Test-Path $GameDir) {
         Remove-Item $GameDir -Recurse -Force
@@ -100,23 +100,23 @@ function Expand-Bundle([string]$zipPath) {
     Expand-Archive -Path $zipPath -DestinationPath $LauncherDir -Force
 }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 Write-Host ""
-Write-Host "  ╔══════════════════════════════╗"
-Write-Host "  ║       Block Game Launcher    ║"
-Write-Host "  ╚══════════════════════════════╝"
+Write-Host "  +==============================+"
+Write-Host "  |       Block Game Launcher    |"
+Write-Host "  +==============================+"
 Write-Host ""
 
 $needsDownload = $false
 
 try {
-    Write-Status "Checking for updates…"
+    Write-Status "Checking for updates..."
     $release       = Get-ReleaseInfo
     $remoteVersion = Get-RemoteVersion $release
     $localVersion  = Get-LocalVersion
 
     if ($null -eq $remoteVersion) {
-        Write-Status "WARNING: Could not read remote version – skipping update check."
+        Write-Status "WARNING: Could not read remote version - skipping update check."
     } elseif ($remoteVersion -ne $localVersion -or -not (Test-Path $GameExe)) {
         Write-Status "New version available: $remoteVersion  (local: $(if ($localVersion) { $localVersion } else { 'none' }))"
         $needsDownload = $true
@@ -146,7 +146,7 @@ try {
     Write-Host ""
 }
 
-# ── Launch ────────────────────────────────────────────────────────────────────
+# -- Launch -------------------------------------------------------------------
 if (-not (Test-Path $GameExe)) {
     Write-Host ""
     Write-Host "  [ERROR] Game executable not found: $GameExe" -ForegroundColor Red
@@ -156,6 +156,6 @@ if (-not (Test-Path $GameExe)) {
     exit 1
 }
 
-Write-Status "Launching Block Game…"
+Write-Status "Launching Block Game..."
 Write-Host ""
 Start-Process -FilePath $GameExe -WorkingDirectory $GameDir
