@@ -3,6 +3,7 @@ package com.blockgame.player;
 import com.blockgame.Saveable;
 import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
+import com.blockgame.rendering.ParticleSystem;
 import com.blockgame.world.BlockType;
 import com.blockgame.world.World;
 import org.joml.Vector3f;
@@ -82,6 +83,9 @@ public class Player implements Saveable {
 
     // Whether the mouse cursor is captured (first-person look active)
     private boolean mouseCaptured = true;
+
+    // Optional particle system – set after construction via setParticleSystem()
+    private ParticleSystem particleSystem = null;
 
     // Dependencies
     private final World        world;
@@ -261,6 +265,9 @@ public class Player implements Saveable {
                 world.setBlock(hit[0], hit[1], hit[2], BlockType.AIR);
                 if (broken.behavior != null) {
                     broken.behavior.onBreak(world, hit[0], hit[1], hit[2]);
+                }
+                if (particleSystem != null) {
+                    particleSystem.spawn(hit[0], hit[1], hit[2], broken);
                 }
                 lastBlockActionMs = now;
             }
@@ -471,6 +478,11 @@ public class Player implements Saveable {
     /** Teleports the player to the given world-space feet position. */
     public void setPosition(float x, float y, float z) {
         position.set(x, y, z);
+    }
+
+    /** Connects the particle system so block-break events spawn particles. */
+    public void setParticleSystem(ParticleSystem ps) {
+        this.particleSystem = ps;
     }
 }
 
