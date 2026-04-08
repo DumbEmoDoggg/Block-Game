@@ -62,8 +62,10 @@ jobs:
           Automatically built from the latest commit on `main`.
 
           ### How to use the launcher
-          1. Download `BlockGameLauncher.bat` and `BlockGameLauncher.ps1` into the same folder (one-time).
-          2. Double-click `BlockGameLauncher.bat` — it downloads the game and keeps it up to date automatically.
+          1. Download `BlockGameLauncher.bat` into any folder (one-time).
+          2. Double-click it — if `BlockGameLauncher.ps1` is missing it is downloaded
+             automatically, then the game is downloaded and kept up to date.
+          3. A launcher window opens; click **Play** when ready.
           NOTES_EOF
 
           # Create the release if it does not exist yet; otherwise just re-upload assets.
