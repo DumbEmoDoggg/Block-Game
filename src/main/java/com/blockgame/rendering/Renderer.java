@@ -199,6 +199,14 @@ public class Renderer {
         worldShader.setFloat("ambientStrength", 0.40f);
         worldShader.setInt("uTexture", 0);
 
+        // Distance fog – fade terrain to sky colour before the render-distance
+        // edge to hide the dark ring of exposed underground chunk faces.
+        float fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;  // ~352 blocks
+        float fogStart = fogEnd * 0.6f;                              // ~211 blocks
+        worldShader.setVector3f("uFogColor", new Vector3f(SKY_R, SKY_G, SKY_B));
+        worldShader.setFloat("uFogStart", fogStart);
+        worldShader.setFloat("uFogEnd",   fogEnd);
+
         glActiveTexture(GL_TEXTURE0);
         textureAtlas.bind();
 
