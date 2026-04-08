@@ -71,7 +71,6 @@ function Invoke-Download([string]$url, [string]$dest) {
     $wc.Headers.Add('User-Agent', 'BlockGame-Launcher')
 
     # Show a simple byte-count progress (no external cmdlets needed)
-    $downloaded = 0
     $wc.add_DownloadProgressChanged({
         param($s, $e)
         $pct = $e.ProgressPercentage
