@@ -119,13 +119,16 @@ public class ChunkMesh {
                     float skyLight = computeSkyLight(ly, surfaceHeights[lx][lz]);
 
                     if (block.solid) {
-                        // Emit a solid face only when the adjacent block is transparent
-                        if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
-                        if (isTransparent(world, chunk, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block, skyLight);
-                        if (isTransparent(world, chunk, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block, skyLight);
-                        if (isTransparent(world, chunk, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
-                        if (isTransparent(world, chunk, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
-                        if (isTransparent(world, chunk, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
+                        // Emit a solid face only when the adjacent block is transparent and
+                        // not the same block type as the current block.  The same-type check
+                        // prevents coplanar z-fighting between adjacent transparent blocks of
+                        // the same kind (e.g. two leaf blocks facing each other).
+                        if (shouldRenderFaceToward(world, chunk, block, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
+                        if (shouldRenderFaceToward(world, chunk, block, lx, ly - 1, lz)) addFace(buf, wx, ly, wz, Face.BOTTOM, block, skyLight);
+                        if (shouldRenderFaceToward(world, chunk, block, lx, ly, lz - 1)) addFace(buf, wx, ly, wz, Face.NORTH,  block, skyLight);
+                        if (shouldRenderFaceToward(world, chunk, block, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
+                        if (shouldRenderFaceToward(world, chunk, block, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
+                        if (shouldRenderFaceToward(world, chunk, block, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
                     } else if (block == BlockType.WATER) {
                         // Emit a water face only at water–air boundaries (never water–water)
                         if (isOpenForWaterFace(world, chunk, lx, ly + 1, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.TOP,    skyLight);
@@ -245,7 +248,8 @@ public class ChunkMesh {
     /**
      * Emits side faces on the given {@code face} side of the column at
      * {@code (lx, lz)} for each Y level that is exposed because the adjacent
-     * column's surface is lower.
+     * column's surface is lower, or because the adjacent block at the surface
+     * level is transparent (e.g. air under a tree canopy, leaves beside grass).
      */
     private void addLodSideFaces(List<Float> buf, Chunk chunk, World world,
                                   int lx, int lz, int surfaceY, int[][] surfaceHeights,
@@ -260,7 +264,22 @@ public class ChunkMesh {
         }
 
         int neighborY = neighborSurfaceHeight(chunk, world, nlx, nlz, surfaceHeights);
-        if (neighborY >= surfaceY) return; // neighbour is at the same level or higher
+        if (neighborY >= surfaceY) {
+            // The neighbour's topmost solid block is at the same level or higher, so
+            // normally no side face is needed.  However, the adjacent block at exactly
+            // surfaceY may still be transparent (e.g. air in the gap below a tree
+            // canopy, or a leaf block adjacent to a grass block at the same height).
+            // In that case the surface block's side face IS visible and must be emitted.
+            BlockType adjAtSurface = getBlockAt(world, chunk, nlx, surfaceY, nlz);
+            if (!adjAtSurface.isTransparent()) return;
+            BlockType surfaceBlock = chunk.getBlock(lx, surfaceY, lz);
+            if (surfaceBlock.solid) {
+                int wx = chunk.getWorldX(lx);
+                int wz = chunk.getWorldZ(lz);
+                addFace(buf, wx, surfaceY, wz, face, surfaceBlock, 1.0f);
+            }
+            return;
+        }
 
         int wx = chunk.getWorldX(lx);
         int wz = chunk.getWorldZ(lz);
@@ -277,17 +296,24 @@ public class ChunkMesh {
     }
 
     // -------------------------------------------------------------------------
-    // Transparency check (handles cross-chunk boundaries)
+    // Face-render decision (handles cross-chunk boundaries)
     // -------------------------------------------------------------------------
 
-    private boolean isTransparent(World world, Chunk chunk, int lx, int ly, int lz) {
-        if (lx >= 0 && lx < Chunk.SIZE && lz >= 0 && lz < Chunk.SIZE
-                && ly >= 0 && ly < Chunk.HEIGHT) {
-            return chunk.getBlock(lx, ly, lz).isTransparent();
-        }
-        int wx = chunk.getWorldX(lx);
-        int wz = chunk.getWorldZ(lz);
-        return world.getBlock(wx, ly, wz).isTransparent();
+    /**
+     * Returns {@code true} if {@code currentBlock} should emit a face toward the
+     * block at local position {@code (lx, ly, lz)}.
+     *
+     * <p>A face is emitted when the adjacent block is transparent (air, water,
+     * leaves, …) <em>and</em> is not the same block type as {@code currentBlock}.
+     * The same-type exclusion prevents coplanar, z-fighting faces from being
+     * generated at boundaries between two adjacent transparent blocks of identical
+     * type (e.g. two leaf blocks facing each other).
+     */
+    private boolean shouldRenderFaceToward(World world, Chunk chunk,
+                                           BlockType currentBlock,
+                                           int lx, int ly, int lz) {
+        BlockType adj = getBlockAt(world, chunk, lx, ly, lz);
+        return adj.isTransparent() && adj != currentBlock;
     }
 
     /**
