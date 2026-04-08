@@ -10,5 +10,6 @@
   "snow":         "snow",
   "planks":       "oak_planks",
   "water_still":  "water_still",
-  "water_flow":   "water_flow"
+  "water_flow":   "water_flow",
+  "gravel":       "gravel"
 }

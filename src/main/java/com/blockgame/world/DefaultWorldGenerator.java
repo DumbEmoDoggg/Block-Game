@@ -42,9 +42,10 @@ public class DefaultWorldGenerator implements WorldGenerator {
                     for (int y = 1; y < surfaceY - 4; y++) {
                         chunk.setBlock(lx, y, lz, BlockType.STONE);
                     }
-                    // Dirt sub-surface layer
+                    // Dirt sub-surface layer.  Replace with SAND below sea level so that
+                    // shallow-water shores don't expose dirt blocks visible through water.
                     for (int y = Math.max(1, surfaceY - 4); y < surfaceY - 1; y++) {
-                        chunk.setBlock(lx, y, lz, BlockType.DIRT);
+                        chunk.setBlock(lx, y, lz, y < SEA_LEVEL ? BlockType.SAND : BlockType.DIRT);
                     }
                     // Biome-appropriate surface block
                     if (surfaceY > 0) {
@@ -62,11 +63,11 @@ public class DefaultWorldGenerator implements WorldGenerator {
                     for (int y = 1; y < surfaceY - 2; y++) {
                         chunk.setBlock(lx, y, lz, BlockType.STONE);
                     }
-                    // Mix SAND and GRAVEL on the floor: roughly 25% gravel, 75% sand.
-                    // The prime multipliers give a deterministic, position-dependent pattern
-                    // without requiring a noise call.
-                    BlockType floorBlock = ((wx * 3 + wz * 7) & 3) == 0
-                            ? BlockType.GRAVEL : BlockType.SAND;
+                    // Mix SAND and GRAVEL on the floor using a scatter hash so there
+                    // are no visible diagonal stripe patterns (roughly 25% gravel).
+                    int h = (wx * 1013904223) ^ (wz * 1664525);
+                    h ^= (h >>> 14);
+                    BlockType floorBlock = (h & 3) == 0 ? BlockType.GRAVEL : BlockType.SAND;
                     for (int y = Math.max(1, surfaceY - 2); y < surfaceY; y++) {
                         chunk.setBlock(lx, y, lz, floorBlock);
                     }

@@ -57,9 +57,12 @@ public class World implements Saveable {
         this.features.add(new OreFeature(noise));
         this.features.add(new TreeFeature());
 
-        // Pre-generate the initial area so the player lands on solid ground
-        for (int cx = -RENDER_DISTANCE; cx <= RENDER_DISTANCE; cx++) {
-            for (int cz = -RENDER_DISTANCE; cz <= RENDER_DISTANCE; cz++) {
+        // Pre-generate a small area around the spawn so the player lands on
+        // solid ground immediately.  The rest of the world loads dynamically
+        // each frame via update().
+        int initialRadius = 4;
+        for (int cx = -initialRadius; cx <= initialRadius; cx++) {
+            for (int cz = -initialRadius; cz <= initialRadius; cz++) {
                 loadChunk(cx, cz);
             }
         }
