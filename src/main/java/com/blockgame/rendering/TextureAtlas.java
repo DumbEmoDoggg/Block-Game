@@ -65,6 +65,7 @@ public class TextureAtlas {
     public static final int TILE_SAND       = 7;
     public static final int TILE_SNOW       = 8;
     public static final int TILE_PLANKS     = 9;
+    public static final int TILE_GRAVEL     = 10;
 
     private final int textureId;
     private final int iconTextureId;
@@ -170,7 +171,9 @@ public class TextureAtlas {
             case SAND:   return TILE_SAND;
             case SNOW:   return TILE_SNOW;
             case PLANKS: return TILE_PLANKS;
-            default:     return TILE_DIRT;
+            case GRAVEL: return TILE_GRAVEL;
+            // Ores and bedrock share the stone tile for now
+            default:     return TILE_STONE;
         }
     }
 
@@ -334,6 +337,7 @@ public class TextureAtlas {
         drawTile(img, TILE_SAND,       loadTile(textureName("sand"),       () -> sand()));
         drawTile(img, TILE_SNOW,       loadTile(textureName("snow"),       () -> snow()));
         drawTile(img, TILE_PLANKS,     loadTile(textureName("planks"),     () -> planks()));
+        drawTile(img, TILE_GRAVEL,     loadTile(textureName("gravel"),     () -> gravel()));
 
         return img;
     }
@@ -603,8 +607,7 @@ public class TextureAtlas {
 
     private static BufferedImage planks() {
         // Horizontal wooden board stripes
-        Random rng = new Random(9L);
-        BufferedImage img = solid(162, 130, 78);
+        Random rng = new Random(9L);        BufferedImage img = solid(162, 130, 78);
         // Board seam lines every 4 pixels
         for (int py = 0; py < TILE_SIZE; py += 4) {
             for (int px = 0; px < TILE_SIZE; px++) {
@@ -622,6 +625,31 @@ public class TextureAtlas {
                 int b = clamp(( base        & 0xFF) + v / 2);
                 setRgb(img, px, py, r, g, b);
             }
+        }
+        return img;
+    }
+
+    private static BufferedImage gravel() {
+        // Gravel: mid-gray base with rounded pebble-like blobs of varying brightness
+        Random rng = new Random(11L);
+        BufferedImage img = solid(130, 126, 120);
+        for (int py = 0; py < TILE_SIZE; py++) {
+            for (int px = 0; px < TILE_SIZE; px++) {
+                int v = rng.nextInt(30) - 15;
+                setRgb(img, px, py, clamp(130 + v), clamp(126 + v), clamp(120 + v));
+            }
+        }
+        // Darker pebble outlines
+        for (int i = 0; i < 20; i++) {
+            int x = rng.nextInt(TILE_SIZE);
+            int y = rng.nextInt(TILE_SIZE);
+            setRgb(img, x, y, 90, 88, 84);
+        }
+        // Lighter pebble highlights
+        for (int i = 0; i < 12; i++) {
+            int x = rng.nextInt(TILE_SIZE);
+            int y = rng.nextInt(TILE_SIZE);
+            setRgb(img, x, y, 165, 160, 155);
         }
         return img;
     }

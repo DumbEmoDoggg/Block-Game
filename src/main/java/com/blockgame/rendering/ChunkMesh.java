@@ -172,7 +172,8 @@ public class ChunkMesh {
             }
         }
 
-        List<Float> buf = new ArrayList<>(Chunk.SIZE * Chunk.SIZE * FLOATS_PER_VERTEX * VERTICES_PER_FACE);
+        List<Float> buf      = new ArrayList<>(Chunk.SIZE * Chunk.SIZE * FLOATS_PER_VERTEX * VERTICES_PER_FACE);
+        List<Float> waterBuf = new ArrayList<>(512);
 
         for (int lx = 0; lx < Chunk.SIZE; lx++) {
             for (int lz = 0; lz < Chunk.SIZE; lz++) {
@@ -184,6 +185,12 @@ public class ChunkMesh {
 
                 // Top face of the surface block (always sky-lit in the LOD mesh)
                 addFace(buf, wx, surfaceY, wz, Face.TOP, chunk.getBlock(lx, surfaceY, lz), 1.0f);
+
+                // For underwater columns emit the water surface at sea level so
+                // distant ocean chunks are visible rather than showing the bare seabed.
+                if (surfaceY < com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL) {
+                    addWaterFace(waterBuf, wx, com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL - 1, wz, Face.TOP, 1.0f);
+                }
 
                 // Side faces: emit wherever the adjacent column is lower so that
                 // the vertical terrain wall is not invisible.
@@ -197,6 +204,10 @@ public class ChunkMesh {
         float[] data = new float[buf.size()];
         for (int i = 0; i < buf.size(); i++) data[i] = buf.get(i);
         upload(data);
+
+        float[] wData = new float[waterBuf.size()];
+        for (int i = 0; i < waterBuf.size(); i++) wData[i] = waterBuf.get(i);
+        uploadWater(wData);
     }
 
     /**
