@@ -19,8 +19,8 @@ package com.blockgame.world;
  */
 public class DefaultWorldGenerator implements WorldGenerator {
 
-    /** Y level below which open air is filled with water. */
-    public static final int SEA_LEVEL = 64;
+    /** Y level below which open air is filled with water (matches Minecraft's sea level). */
+    public static final int SEA_LEVEL = 63;
 
     @Override
     public void generate(Chunk chunk, World world) {

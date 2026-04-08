@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +36,18 @@ public class World implements Saveable {
     private final BiomeProvider   biomeProvider;
     private final WorldGenerator  generator;
     private final List<WorldFeature> features;
+
+    /** Lightweight block-position value used as tick-queue key. */
+    private record TickPos(int x, int y, int z) {}
+
+    /**
+     * Blocks that need a {@link BlockBehavior#onTick} call next update.
+     * Two sets are kept and swapped each frame (double-buffering) so that
+     * ticks scheduled during processing are deferred to the following frame
+     * without allocating a temporary snapshot list.
+     */
+    private LinkedHashSet<TickPos> pendingTicks    = new LinkedHashSet<>();
+    private LinkedHashSet<TickPos> processingTicks = new LinkedHashSet<>();
 
     public World() {
         this.biomeProvider = new DefaultBiomeProvider(this);
@@ -142,8 +155,18 @@ public class World implements Saveable {
         int lx = Math.floorMod(wx, Chunk.SIZE);
         int lz = Math.floorMod(wz, Chunk.SIZE);
 
+        // Notify the old block that it is being removed
+        BlockType old = getBlock(wx, wy, wz);
+        if (old.behavior != null) old.behavior.onBreak(this, wx, wy, wz);
+
         Chunk chunk = getOrLoadChunk(cx, cz);
         chunk.setBlock(lx, wy, lz, type);
+
+        // Notify the new block that it has been placed
+        if (type.behavior != null) type.behavior.onPlace(this, wx, wy, wz);
+
+        // Let adjacent dynamic blocks (e.g. water) react to this change
+        scheduleAdjacentBehaviorTicks(wx, wy, wz);
 
         // Also dirty adjacent chunks if we modified a border block
         if (lx == 0)            markDirty(cx - 1, cz);
@@ -155,6 +178,35 @@ public class World implements Saveable {
     private void markDirty(int cx, int cz) {
         Chunk c = getChunk(cx, cz);
         if (c != null) c.setDirty(true);
+    }
+
+    /**
+     * Queues a block-tick for the given world position.  On the next call to
+     * {@link #update} the block's {@link BlockBehavior#onTick} will be invoked
+     * (if it still has a non-null behaviour at that point).  Duplicate
+     * positions in the same frame are coalesced automatically.
+     */
+    public void scheduleBlockTick(int wx, int wy, int wz) {
+        pendingTicks.add(new TickPos(wx, wy, wz));
+    }
+
+    /**
+     * Schedules ticks for every neighbour of {@code (wx, wy, wz)} that
+     * currently has a non-null {@link BlockBehavior}.  Called whenever a
+     * block is changed so that adjacent dynamic blocks (e.g. water) can
+     * react to the change.
+     */
+    private void scheduleAdjacentBehaviorTicks(int wx, int wy, int wz) {
+        int[][] neighbors = {
+            {wx + 1, wy, wz}, {wx - 1, wy, wz},
+            {wx, wy + 1, wz}, {wx, wy - 1, wz},
+            {wx, wy, wz + 1}, {wx, wy, wz - 1}
+        };
+        for (int[] n : neighbors) {
+            if (getBlock(n[0], n[1], n[2]).behavior != null) {
+                scheduleBlockTick(n[0], n[1], n[2]);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -169,6 +221,22 @@ public class World implements Saveable {
             for (int cz = pcz - RENDER_DISTANCE; cz <= pcz + RENDER_DISTANCE; cz++) {
                 getOrLoadChunk(cx, cz);
             }
+        }
+
+        // Process pending block ticks (fluid flow, physics, etc.).
+        // Double-buffer: swap sets so newly scheduled ticks go into the
+        // (now-empty) pendingTicks set and are deferred to the next frame.
+        if (!pendingTicks.isEmpty()) {
+            LinkedHashSet<TickPos> ticks = pendingTicks;
+            pendingTicks    = processingTicks;
+            processingTicks = ticks;
+            for (TickPos pos : processingTicks) {
+                BlockType type = getBlock(pos.x(), pos.y(), pos.z());
+                if (type.behavior != null) {
+                    type.behavior.onTick(this, pos.x(), pos.y(), pos.z());
+                }
+            }
+            processingTicks.clear();
         }
 
         // Unload chunks that have moved out of range to bound memory usage
