@@ -764,8 +764,8 @@ public class Renderer {
         float hotbarW = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
         float bottomY = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
 
-        // Icon slightly inset (4px on each side) within each slot to show slot border
-        float insetPx = 4.0f * GUI_SCALE;
+        // Icon inset: 2 texture-px × GUI_SCALE on each side, leaving 32×32 px for the icon
+        float insetPx = 2.0f * GUI_SCALE;
         float insetW  = (viewportW > 0) ? 2.0f * insetPx / viewportW : 0.0125f;
         float insetH  = (viewportH > 0) ? 2.0f * insetPx / viewportH : 0.0222f;
         float iconW   = slotW - 2 * insetW;
@@ -823,9 +823,7 @@ public class Renderer {
         glBindBuffer(GL_ARRAY_BUFFER, heartVbo);
 
         // 2 passes × HEART_COUNT hearts × 6 vertices × 4 floats
-        FloatBuffer fb = BufferUtils.createFloatBuffer(2 * HEART_COUNT * 6 * 4);
-        fb.flip();
-        glBufferData(GL_ARRAY_BUFFER, fb, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (long)(2 * HEART_COUNT * 6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
 
         int stride = 4 * Float.BYTES;
         glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);

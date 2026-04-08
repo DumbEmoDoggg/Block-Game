@@ -186,12 +186,13 @@ public class ChunkMesh {
                 int wx = chunk.getWorldX(lx);
                 int wz = chunk.getWorldZ(lz);
 
-                // Top face of the surface block (always sky-lit in the LOD mesh)
-                addFace(buf, wx, surfaceY, wz, Face.TOP, chunk.getBlock(lx, surfaceY, lz), 1.0f);
-
-                // For underwater columns emit the water surface at sea level so
-                // distant ocean chunks are visible rather than showing the bare seabed.
-                if (surfaceY < com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL) {
+                if (surfaceY >= com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL) {
+                    // Above-water column: emit the surface block's top face.
+                    addFace(buf, wx, surfaceY, wz, Face.TOP, chunk.getBlock(lx, surfaceY, lz), 1.0f);
+                } else {
+                    // Underwater column: emit only the water surface at sea level.
+                    // Skipping the seabed top face avoids the stepped seabed pattern
+                    // showing through the transparent water in distant LOD 1 chunks.
                     addWaterFace(waterBuf, wx, com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL - 1, wz, Face.TOP, 1.0f);
                 }
 
