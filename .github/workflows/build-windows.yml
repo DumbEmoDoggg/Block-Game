@@ -56,11 +56,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NOTES="Automatically built from commit ${{ github.sha }} (run #${{ github.run_number }}).
+          cat > /tmp/release-notes.md << 'NOTES_EOF'
+          Automatically built from the latest commit on `main`.
 
           ### How to use the launcher
-          1. Download \`BlockGameLauncher.bat\` and \`BlockGameLauncher.ps1\` into the same folder (one-time).
-          2. Double-click \`BlockGameLauncher.bat\` — it downloads the game and keeps it up to date automatically."
+          1. Download `BlockGameLauncher.bat` and `BlockGameLauncher.ps1` into the same folder (one-time).
+          2. Double-click `BlockGameLauncher.bat` — it downloads the game and keeps it up to date automatically.
+          NOTES_EOF
 
           # Create the release if it does not exist yet; otherwise just re-upload assets.
           if gh release view latest-build --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
@@ -74,7 +76,7 @@ jobs:
           else
             gh release create latest-build \
               --title "Latest Build" \
-              --notes "$NOTES" \
+              --notes-file /tmp/release-notes.md \
               --prerelease \
               target/BlockGame-windows-bundled.zip \
               target/BlockGame.exe \
