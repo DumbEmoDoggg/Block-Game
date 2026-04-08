@@ -1,9 +1,12 @@
 package com.blockgame.rendering;
 
 import com.blockgame.mob.MobManager;
+import com.blockgame.player.Inventory;
 import com.blockgame.player.Player;
 import com.blockgame.world.BlockType;
 import com.blockgame.world.Chunk;
+import com.blockgame.world.DroppedItem;
+import com.blockgame.world.DroppedItemManager;
 import com.blockgame.world.World;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
@@ -18,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -87,7 +91,7 @@ public class Renderer {
     private int hotbarImageVao, hotbarImageVbo;
     // OpenGL texture loaded from GUI/hotbar.png
     private int hotbarTexId;
-    private static final int HOTBAR_SLOTS = 8;
+    private static final int HOTBAR_SLOTS = 9;
 
     // Hotbar icon geometry (textured quads over each slot)
     private int iconVao, iconVbo;
@@ -95,6 +99,19 @@ public class Renderer {
     // Block-face highlight geometry
     private int highlightVao, highlightVbo;
     private final FloatBuffer highlightBuf = BufferUtils.createFloatBuffer(6 * 3);
+
+    // Inventory overlay
+    private int inventoryTexId;
+    private int inventoryOverlayVao, inventoryOverlayVbo;
+    private int inventoryBgVao, inventoryBgVbo;
+    private int inventoryIconVao, inventoryIconVbo;
+    // Number of inventory icon quads to draw (filled each frame)
+    private int inventoryIconCount = 0;
+
+    // Dropped-item billboard geometry (dynamic, rebuilt each frame)
+    private int droppedItemVao, droppedItemVbo;
+    private static final int MAX_DROPPED_ITEM_VERTS = 2048 * 6; // up to 2048 items × 2 tris
+    private DroppedItemManager droppedItemManager = null;
 
     private int viewportW, viewportH;
 
@@ -127,10 +144,13 @@ public class Renderer {
         buildHotbar();
         buildIconHotbar();
         buildHighlight();
+        buildInventoryOverlay();
+        buildDroppedItemVao();
 
         // Load GUI overlay images (crosshair + hotbar background)
-        crosshairTexId = loadGuiTexture("crosshair");
-        hotbarTexId    = loadGuiTexture("hotbar");
+        crosshairTexId  = loadGuiTexture("crosshair");
+        hotbarTexId     = loadGuiTexture("hotbar");
+        inventoryTexId  = loadGuiTexture("inventory");
         buildHotbarImage();
 
         // Read initial framebuffer size
@@ -165,8 +185,13 @@ public class Renderer {
         renderWater();
         renderParticles();
         renderMobs();
+        renderDroppedItems();
         renderHighlight();
         renderHud();
+
+        if (player.isInventoryOpen()) {
+            renderInventory();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -832,6 +857,382 @@ public class Renderer {
     }
 
     // -------------------------------------------------------------------------
+    // Inventory overlay
+    // -------------------------------------------------------------------------
+
+    /** Connects the dropped-item manager so dropped items are rendered each frame. */
+    public void setDroppedItemManager(DroppedItemManager m) {
+        this.droppedItemManager = m;
+    }
+
+    /**
+     * Builds a full-screen quad (for the semi-transparent dimming overlay),
+     * a centered quad for inventory.png, and a dynamic VAO for 36 icon slots.
+     */
+    private void buildInventoryOverlay() {
+        // Full-screen dim quad
+        float[] overlay = {
+            -1f, -1f,  0f, 1f,
+             1f, -1f,  1f, 1f,
+             1f,  1f,  1f, 0f,
+            -1f, -1f,  0f, 1f,
+             1f,  1f,  1f, 0f,
+            -1f,  1f,  0f, 0f
+        };
+        inventoryOverlayVao = glGenVertexArrays();
+        inventoryOverlayVbo = glGenBuffers();
+        glBindVertexArray(inventoryOverlayVao);
+        glBindBuffer(GL_ARRAY_BUFFER, inventoryOverlayVbo);
+        FloatBuffer fb = BufferUtils.createFloatBuffer(overlay.length);
+        fb.put(overlay).flip();
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+
+        // Centered inventory.png background quad (built in buildInventoryBg)
+        inventoryBgVao = glGenVertexArrays();
+        inventoryBgVbo = glGenBuffers();
+
+        // Dynamic icon quads for 36 slots
+        inventoryIconVao = glGenVertexArrays();
+        inventoryIconVbo = glGenBuffers();
+        glBindVertexArray(inventoryIconVao);
+        glBindBuffer(GL_ARRAY_BUFFER, inventoryIconVbo);
+        // 36 slots × 6 verts × 4 floats each
+        glBufferData(GL_ARRAY_BUFFER, (long) Inventory.SIZE * 6 * 4 * Float.BYTES,
+                     GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, 4 * Float.BYTES, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, 4 * Float.BYTES, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders the inventory screen: dark overlay + inventory.png + block icons.
+     *
+     * <p>The inventory.png is 256×256.  Slot pixel centres (measured in the
+     * 256×256 image space) are:
+     * <ul>
+     *   <li>Main grid (3 rows × 9 cols): column centres 14, 32, 50, 68, 86, 104, 122, 140, 158 px;
+     *       row centres 83, 101, 119 px.</li>
+     *   <li>Hotbar row (1 row × 9): same column centres, row centre 141 px.</li>
+     * </ul>
+     * The image is centred in the viewport and scaled so its height is 85 % of
+     * the smaller viewport dimension.
+     */
+    private void renderInventory() {
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // --- Dark overlay ---
+        // Re-use iconShader but bind a 1×1 black-semi-transparent texture is too
+        // complex; instead use hudShader to draw a solid dark rectangle.
+        hudShader.use();
+        // Draw full-screen quad with rgba(0,0,0,0.55) – pass colour via vertex data
+        {
+            float[] quad = {
+                -1f, -1f,  0f, 0f, 0f,
+                 1f, -1f,  0f, 0f, 0f,
+                 1f,  1f,  0f, 0f, 0f,
+                -1f, -1f,  0f, 0f, 0f,
+                 1f,  1f,  0f, 0f, 0f,
+                -1f,  1f,  0f, 0f, 0f
+            };
+            glBindVertexArray(inventoryOverlayVao);
+            // We repurpose the overlay VAO (pos2+uv2) – the hud shader wants pos2+col3.
+            // Instead rebuild on the overlay VBO with hud-shader layout (2+3 floats):
+            FloatBuffer fb = BufferUtils.createFloatBuffer(quad.length);
+            fb.put(quad).flip();
+            // Use a temporary VBO approach: just draw a manual quad via GL_TRIANGLES
+            // Upload through the highlight VBO trick (pos+col per vertex):
+            // Actually, let's just use a simple separate immediate-style draw.
+        }
+
+        // Simple approach: draw dark semi-transparent overlay via hudShader with
+        // the hotbarVao trick (it already handles 2+3 float stride):
+        float[] darkQuad = new float[6 * 5];
+        float[] corners = {-1f,-1f, 1f,-1f, 1f,1f, -1f,-1f, 1f,1f, -1f,1f};
+        for (int v = 0; v < 6; v++) {
+            darkQuad[v*5]   = corners[v*2];
+            darkQuad[v*5+1] = corners[v*2+1];
+            darkQuad[v*5+2] = 0f; // r
+            darkQuad[v*5+3] = 0f; // g
+            darkQuad[v*5+4] = 0f; // b
+        }
+        // Upload into hotbarVbo (it's already DYNAMIC_DRAW)
+        FloatBuffer darkFb = BufferUtils.createFloatBuffer(darkQuad.length);
+        darkFb.put(darkQuad).flip();
+        glBindBuffer(GL_ARRAY_BUFFER, hotbarVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, darkFb);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        hudShader.use();
+        glBindVertexArray(hotbarVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+
+        // Restore hotbar highlight (will be re-uploaded next frame by updateHotbarColors)
+
+        // --- Inventory image background ---
+        if (inventoryTexId != 0) {
+            float scale   = Math.min(viewportW, viewportH) * 0.85f / 256f;
+            float ndcW    = (256f * scale) / viewportW;
+            float ndcH    = (256f * scale) / viewportH;
+
+            float x0 = -ndcW, y0 = -ndcH, x1 = ndcW, y1 = ndcH;
+            float[] bg = {
+                x0, y0,  0f, 1f,
+                x1, y0,  1f, 1f,
+                x1, y1,  1f, 0f,
+                x0, y0,  0f, 1f,
+                x1, y1,  1f, 0f,
+                x0, y1,  0f, 0f
+            };
+            FloatBuffer bgFb = BufferUtils.createFloatBuffer(bg.length);
+            bgFb.put(bg).flip();
+
+            glBindVertexArray(inventoryBgVao);
+            glBindBuffer(GL_ARRAY_BUFFER, inventoryBgVbo);
+            glBufferData(GL_ARRAY_BUFFER, bgFb, GL_DYNAMIC_DRAW);
+            int stride = 4 * Float.BYTES;
+            glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+            glEnableVertexAttribArray(1);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            iconShader.use();
+            iconShader.setInt("uIcons", 0);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, inventoryTexId);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glBindVertexArray(0);
+
+            // --- Inventory item icons ---
+            float scale2  = scale;
+            float imgNdcW = ndcW;
+            float imgNdcH = ndcH;
+
+            // Slot pixel centres in 256×256 image space
+            // Main grid: cols 14,32,50,68,86,104,122,140,158  rows 83,101,119
+            // Hotbar:    same cols, row 141
+            int[] colPx = {14, 32, 50, 68, 86, 104, 122, 140, 158};
+            int[] rowPx = {83, 101, 119, 141}; // rows 0-2 = main, row 3 = hotbar
+
+            // Inventory slot mapping: slots 9..35 = main grid (row 0..2, col 0..8)
+            //                         slots 0..8  = hotbar (row 3, col 0..8)
+            Inventory inv = player.getInventory();
+
+            FloatBuffer iconFb = BufferUtils.createFloatBuffer(Inventory.SIZE * 6 * 4);
+
+            // Icon half-size in NDC: slot is ~16px in 256 image → 16/256 * imgNdcW
+            float iconHalfW = (8f / 256f) * imgNdcW;
+            float iconHalfH = (8f / 256f) * imgNdcH;
+
+            int drawCount = 0;
+            // Main inventory rows (slots 9..35 → rows 0..2)
+            for (int row = 0; row < 3; row++) {
+                for (int col = 0; col < 9; col++) {
+                    int slotIdx = 9 + row * 9 + col;
+                    BlockType bt = inv.getSlot(slotIdx) != null ? inv.getSlot(slotIdx).type : BlockType.AIR;
+                    int iconIdx = TextureAtlas.getIconIndex(bt);
+                    if (iconIdx < 0) continue;
+
+                    float cx = ((float) colPx[col] / 256f - 0.5f) * 2f * imgNdcW;
+                    float cy = (0.5f - (float) rowPx[row] / 256f) * 2f * imgNdcH;
+                    float[] uv = TextureAtlas.getIconUV(iconIdx);
+                    putInvIconQuad(iconFb, cx, cy, iconHalfW, iconHalfH, uv);
+                    drawCount++;
+                }
+            }
+            // Hotbar row (slots 0..8 → row index 3)
+            for (int col = 0; col < 9; col++) {
+                BlockType bt = inv.getHotbarBlock(col);
+                int iconIdx = TextureAtlas.getIconIndex(bt);
+                if (iconIdx < 0) continue;
+
+                float cx = ((float) colPx[col] / 256f - 0.5f) * 2f * imgNdcW;
+                float cy = (0.5f - (float) rowPx[3] / 256f) * 2f * imgNdcH;
+                float[] uv = TextureAtlas.getIconUV(iconIdx);
+                putInvIconQuad(iconFb, cx, cy, iconHalfW, iconHalfH, uv);
+                drawCount++;
+            }
+            iconFb.flip();
+
+            glBindVertexArray(inventoryIconVao);
+            glBindBuffer(GL_ARRAY_BUFFER, inventoryIconVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, iconFb);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            iconShader.use();
+            iconShader.setInt("uIcons", 0);
+            glActiveTexture(GL_TEXTURE0);
+            textureAtlas.bindIcons();
+            glDrawArrays(GL_TRIANGLES, 0, drawCount * 6);
+            glBindVertexArray(0);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+    private static void putInvIconQuad(FloatBuffer fb,
+                                       float cx, float cy,
+                                       float hw, float hh,
+                                       float[] uv) {
+        float x0 = cx - hw, x1 = cx + hw;
+        float y0 = cy - hh, y1 = cy + hh;
+        float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+        putIconVertex(fb, x0, y0, u0, v1);
+        putIconVertex(fb, x1, y0, u1, v1);
+        putIconVertex(fb, x1, y1, u1, v0);
+        putIconVertex(fb, x0, y0, u0, v1);
+        putIconVertex(fb, x1, y1, u1, v0);
+        putIconVertex(fb, x0, y1, u0, v0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Dropped-item billboard rendering
+    // -------------------------------------------------------------------------
+
+    private void buildDroppedItemVao() {
+        droppedItemVao = glGenVertexArrays();
+        droppedItemVbo = glGenBuffers();
+
+        glBindVertexArray(droppedItemVao);
+        glBindBuffer(GL_ARRAY_BUFFER, droppedItemVbo);
+        // Allocate max buffer (pos3+uv2+normal3 = 8 floats per vertex)
+        glBufferData(GL_ARRAY_BUFFER, (long) MAX_DROPPED_ITEM_VERTS * 8 * Float.BYTES,
+                     GL_DYNAMIC_DRAW);
+        int stride = 8 * Float.BYTES;
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 5L * Float.BYTES);
+        glEnableVertexAttribArray(2);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders all dropped items as Y-axis billboards facing the player.
+     * Uses the world shader with the icon atlas bound as the texture.
+     */
+    private void renderDroppedItems() {
+        if (droppedItemManager == null) return;
+        List<DroppedItem> items = droppedItemManager.getItems();
+        if (items.isEmpty()) return;
+
+        Vector3f camPos = player.getCamera().getPosition();
+        float time = (float) glfwGetTime();
+
+        FloatBuffer buf = BufferUtils.createFloatBuffer(
+                Math.min(items.size(), MAX_DROPPED_ITEM_VERTS / 6) * 6 * 8);
+
+        int count = 0;
+        for (DroppedItem item : items) {
+            if (count >= MAX_DROPPED_ITEM_VERTS / 6) break;
+
+            int iconIdx = TextureAtlas.getIconIndex(item.type);
+            if (iconIdx < 0) continue;
+
+            // Slight bobbing animation
+            float bob = (float) Math.sin(time * 2.5f + item.getAge() * 3f) * 0.06f;
+
+            float ix = item.x;
+            float iy = item.y + bob;
+            float iz = item.z;
+
+            // Billboard: Y-axis facing player (ignore vertical component)
+            float fdx = camPos.x - ix;
+            float fdz = camPos.z - iz;
+            float flen = (float) Math.sqrt(fdx * fdx + fdz * fdz);
+            if (flen < 0.001f) { fdx = 1; flen = 1; }
+            fdx /= flen; fdz /= flen;
+            // right = cross((0,1,0), forward) = (fdz, 0, -fdx)
+            float rx = fdz, rz = -fdx;
+
+            float s = 0.25f;  // half-width of the item quad
+
+            float[] uv = TextureAtlas.getIconUV(iconIdx);
+            float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+
+            // 4 corners: bottom-left, bottom-right, top-right, top-left
+            float[][] pos = {
+                {ix - rx*s, iy,     iz - rz*s},
+                {ix + rx*s, iy,     iz + rz*s},
+                {ix + rx*s, iy+s*2, iz + rz*s},
+                {ix - rx*s, iy+s*2, iz - rz*s}
+            };
+            // normal points toward player (in XZ plane)
+            float nx = fdx, ny = 0f, nz = fdz;
+
+            // Triangle 1: 0,1,2
+            putBillboardVertex(buf, pos[0], u0, v1, nx, ny, nz);
+            putBillboardVertex(buf, pos[1], u1, v1, nx, ny, nz);
+            putBillboardVertex(buf, pos[2], u1, v0, nx, ny, nz);
+            // Triangle 2: 0,2,3
+            putBillboardVertex(buf, pos[0], u0, v1, nx, ny, nz);
+            putBillboardVertex(buf, pos[2], u1, v0, nx, ny, nz);
+            putBillboardVertex(buf, pos[3], u0, v0, nx, ny, nz);
+            count++;
+        }
+
+        if (count == 0) return;
+
+        buf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, droppedItemVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, buf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        // Use worldShader with icon atlas
+        worldShader.use();
+        worldShader.setMatrix4f("model",      new Matrix4f().identity());
+        worldShader.setMatrix4f("view",       player.getCamera().getViewMatrix());
+        worldShader.setMatrix4f("projection", player.getCamera().getProjectionMatrix());
+        worldShader.setVector3f("lightDir",   LIGHT_DIR);
+        worldShader.setFloat("ambientStrength", 1.0f); // full brightness for items
+        worldShader.setInt("uTexture", 0);
+        float fogEnd = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
+        worldShader.setVector3f("uFogColor", new Vector3f(SKY_R, SKY_G, SKY_B));
+        worldShader.setFloat("uFogStart", fogEnd * 0.6f);
+        worldShader.setFloat("uFogEnd",   fogEnd);
+
+        glActiveTexture(GL_TEXTURE0);
+        textureAtlas.bindIcons();
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_CULL_FACE);
+
+        glBindVertexArray(droppedItemVao);
+        glDrawArrays(GL_TRIANGLES, 0, count * 6);
+        glBindVertexArray(0);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_CULL_FACE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    private static void putBillboardVertex(FloatBuffer buf, float[] pos,
+                                           float u, float v,
+                                           float nx, float ny, float nz) {
+        buf.put(pos[0]).put(pos[1]).put(pos[2]);
+        buf.put(u).put(v);
+        buf.put(nx).put(ny).put(nz);
+    }
+
+    // -------------------------------------------------------------------------
     // Generic HUD VAO helper (position-only, 2D)
     // -------------------------------------------------------------------------
 
@@ -879,5 +1280,14 @@ public class Renderer {
         glDeleteBuffers(iconVbo);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
+        glDeleteVertexArrays(inventoryOverlayVao);
+        glDeleteBuffers(inventoryOverlayVbo);
+        glDeleteVertexArrays(inventoryBgVao);
+        glDeleteBuffers(inventoryBgVbo);
+        glDeleteVertexArrays(inventoryIconVao);
+        glDeleteBuffers(inventoryIconVbo);
+        if (inventoryTexId != 0) glDeleteTextures(inventoryTexId);
+        glDeleteVertexArrays(droppedItemVao);
+        glDeleteBuffers(droppedItemVbo);
     }
 }

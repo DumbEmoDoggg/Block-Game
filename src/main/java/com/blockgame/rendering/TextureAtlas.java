@@ -50,9 +50,9 @@ public class TextureAtlas {
 
     public static final int TILE_SIZE  = 16;
     public static final int ATLAS_COLS = 4;
-    public static final int ATLAS_ROWS = 3;
+    public static final int ATLAS_ROWS = 4;
     public static final int ATLAS_W    = TILE_SIZE * ATLAS_COLS; // 64
-    public static final int ATLAS_H    = TILE_SIZE * ATLAS_ROWS; // 48
+    public static final int ATLAS_H    = TILE_SIZE * ATLAS_ROWS; // 64
 
     // Tile IDs (row-major: tile N is at column N%ATLAS_COLS, row N/ATLAS_COLS)
     public static final int TILE_GRASS_TOP  = 0;
@@ -66,6 +66,9 @@ public class TextureAtlas {
     public static final int TILE_SNOW       = 8;
     public static final int TILE_PLANKS     = 9;
     public static final int TILE_GRAVEL     = 10;
+    public static final int TILE_COAL_ORE   = 11;
+    public static final int TILE_IRON_ORE   = 12;
+    public static final int TILE_GOLD_ORE   = 13;
 
     private final int textureId;
     private final int iconTextureId;
@@ -73,9 +76,10 @@ public class TextureAtlas {
     // Icon atlas layout: one 32×32 icon per non-AIR solid block type
     // All solid block types in order (matches ICON_BLOCKS array)
     public static final BlockType[] ICON_BLOCKS = {
-        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
-        BlockType.SNOW,  BlockType.PLANKS
+        BlockType.GRASS,    BlockType.DIRT,     BlockType.STONE,
+        BlockType.WOOD,     BlockType.LEAVES,   BlockType.SAND,
+        BlockType.SNOW,     BlockType.PLANKS,   BlockType.GRAVEL,
+        BlockType.COAL_ORE, BlockType.IRON_ORE, BlockType.GOLD_ORE
     };
     public static final int ICON_SIZE   = 32; // pixels per icon
     public static final int ICON_COUNT  = ICON_BLOCKS.length;
@@ -172,7 +176,10 @@ public class TextureAtlas {
             case SNOW:   return TILE_SNOW;
             case PLANKS: return TILE_PLANKS;
             case GRAVEL: return TILE_GRAVEL;
-            // Ores and bedrock share the stone tile for now
+            case COAL_ORE: return TILE_COAL_ORE;
+            case IRON_ORE: return TILE_IRON_ORE;
+            case GOLD_ORE: return TILE_GOLD_ORE;
+            // Bedrock, water share the stone tile
             default:     return TILE_STONE;
         }
     }
@@ -242,53 +249,55 @@ public class TextureAtlas {
     /**
      * Draws the top face of an isometric block icon into {@code dest} at x-offset {@code ox}.
      *
-     * <p>The top face is projected as a diamond (parallelogram) spanning the full
-     * 32-pixel icon width and about 10 pixels tall at the top of the icon.
-     * Pixel (srcX, srcY) of the 16×16 tile maps to a 2×1 pixel rhombus in the icon.
+     * <p>Uses a forward-mapping diamond projection: each source pixel (sx, sy)
+     * maps to destination pixel (ox + (sx-sy) + TILE_SIZE-1, (sx+sy)/2).
+     * Two adjacent horizontal pixels are written per source pixel to close gaps.
      */
     private static void drawIsometricTop(BufferedImage dest, BufferedImage tile, int ox) {
-        // Each source pixel → 2 destination pixels wide, 1 pixel tall
-        // Top-left corner of the rhombus: (0, 8) in the icon
-        // Row srcY shifts the start-x by -srcY and +srcX
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Isometric mapping: each step right = +2, -1; each step down = -2, -1 (for top view)
-                int dx = sx * 2 - sy * 2;
-                int dy = sx + sy;
-                // Center in 32-wide icon: add half-width offset
-                int px = ox + dx; // range: -(2*15)=−30 to +(2*15)=+30 from center... need re-centering
-                // Re-center: dx ranges [-30, 30], we want [0, 31]
-                px = ox + dx + ICON_SIZE / 2 - 1;
-                int py = dy / 2; // range [0, 15]
+                if (((argb >> 24) & 0xFF) == 0) continue; // transparent
+
+                int dx = (sx - sy) + (TILE_SIZE - 1);  // range [0, 2*(TILE_SIZE-1)] = [0, 30]
+                int dy = (sx + sy) / 2;                 // range [0, TILE_SIZE-1] = [0, 15]
+
+                int px = ox + dx;
+                int py = dy;
+
                 if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
-                    // Fill the second pixel to the right to avoid gaps
-                    if (px + 1 < ox + ICON_SIZE) {
-                        dest.setRGB(px + 1, py, argb);
-                    }
+                }
+                // Fill the pixel to the right to close horizontal gaps
+                if (px + 1 >= ox && px + 1 < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+                    dest.setRGB(px + 1, py, argb);
                 }
             }
         }
     }
 
     /**
-     * Draws the left (front) side face of the isometric icon.
-     * The left face is below the top-left edge of the rhombus.
+     * Draws the left (front) side face of the isometric icon at x-offset {@code ox}.
+     *
+     * <p>The left face occupies x ∈ [ox, ox+TILE_SIZE) and sits directly below
+     * the left edge of the diamond top face.  Each column sx skews downward by
+     * half a pixel per source row.
      */
     private static void drawIsometricLeft(BufferedImage dest, BufferedImage tile, int ox) {
-        // Left face: left half of the icon, y=8..30
-        // Source x maps to icon column 0..15, source y maps down with a slight skew
-        int topY = 8; // where the top face ends on the left
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Darken the left face slightly (ambient occlusion effect)
+                if (((argb >> 24) & 0xFF) == 0) continue;
+
                 argb = darkenColor(argb, 0.70f);
-                // Left face: x maps left half (px 0..15), y maps down with isometric skew
+
                 int px = ox + sx;
-                int py = topY + sy + (TILE_SIZE - 1 - sx) / 2;
-                if (px >= ox && px < ox + ICON_SIZE / 2 && py >= 0 && py < ICON_SIZE) {
+                // Column sx starts at the point on the top-diamond left edge where sx maps:
+                //   top-diamond left edge at sx: dy = (sx + TILE_SIZE - 1) / 2
+                //   +1 so the face starts just below the top face
+                int py = (sx + TILE_SIZE - 1) / 2 + 1 + sy;
+
+                if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
                 }
             }
@@ -296,20 +305,24 @@ public class TextureAtlas {
     }
 
     /**
-     * Draws the right side face of the isometric icon.
-     * The right face is below the top-right edge of the rhombus.
+     * Draws the right side face of the isometric icon at x-offset {@code ox}.
+     *
+     * <p>The right face occupies x ∈ [ox+TILE_SIZE, ox+ICON_SIZE) and mirrors
+     * the left face's skew in the opposite direction.
      */
     private static void drawIsometricRight(BufferedImage dest, BufferedImage tile, int ox) {
-        int topY = 8;
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Darken the right face slightly more (shadow side)
+                if (((argb >> 24) & 0xFF) == 0) continue;
+
                 argb = darkenColor(argb, 0.85f);
-                // Right face: x maps right half (px 16..31), skewed oppositely
-                int px = ox + ICON_SIZE / 2 + sx;
-                int py = topY + sy + sx / 2;
-                if (px >= ox + ICON_SIZE / 2 && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+
+                int px = ox + TILE_SIZE + sx;
+                // Mirror of left: top-diamond right edge at column (TILE_SIZE-1-sx)
+                int py = (TILE_SIZE - 1 - sx + TILE_SIZE - 1) / 2 + 1 + sy;
+
+                if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
                 }
             }
@@ -338,6 +351,9 @@ public class TextureAtlas {
         drawTile(img, TILE_SNOW,       loadTile(textureName("snow"),       () -> snow()));
         drawTile(img, TILE_PLANKS,     loadTile(textureName("planks"),     () -> planks()));
         drawTile(img, TILE_GRAVEL,     loadTile(textureName("gravel"),     () -> gravel()));
+        drawTile(img, TILE_COAL_ORE,   loadTile(textureName("coal_ore"),   () -> coalOre()));
+        drawTile(img, TILE_IRON_ORE,   loadTile(textureName("iron_ore"),   () -> ironOre()));
+        drawTile(img, TILE_GOLD_ORE,   loadTile(textureName("gold_ore"),   () -> goldOre()));
 
         return img;
     }
@@ -658,7 +674,42 @@ public class TextureAtlas {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Creates a solid-color 16×16 tile. */
+    private static BufferedImage coalOre() {
+        Random rng = new Random(12L);
+        BufferedImage img = stone();
+        for (int i = 0; i < 18; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 20, 20, 20);
+        }
+        for (int i = 0; i < 8; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 50, 50, 50);
+        }
+        return img;
+    }
+
+    private static BufferedImage ironOre() {
+        Random rng = new Random(13L);
+        BufferedImage img = stone();
+        for (int i = 0; i < 16; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 200, 120, 80);
+        }
+        for (int i = 0; i < 8; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 160, 90, 60);
+        }
+        return img;
+    }
+
+    private static BufferedImage goldOre() {
+        Random rng = new Random(14L);
+        BufferedImage img = stone();
+        for (int i = 0; i < 14; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 240, 200, 40);
+        }
+        for (int i = 0; i < 8; i++) {
+            setRgb(img, rng.nextInt(TILE_SIZE), rng.nextInt(TILE_SIZE), 200, 160, 20);
+        }
+        return img;
+    }
+
     private static BufferedImage solid(int r, int g, int b) {
         BufferedImage img = new BufferedImage(TILE_SIZE, TILE_SIZE, BufferedImage.TYPE_INT_ARGB);
         int argb = 0xFF000000 | (r << 16) | (g << 8) | b;

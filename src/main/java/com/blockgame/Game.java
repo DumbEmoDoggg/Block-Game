@@ -6,6 +6,7 @@ import com.blockgame.mob.MobManager;
 import com.blockgame.player.Player;
 import com.blockgame.rendering.ParticleSystem;
 import com.blockgame.rendering.Renderer;
+import com.blockgame.world.DroppedItemManager;
 import com.blockgame.world.World;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
@@ -60,6 +61,7 @@ public class Game {
     private Player player;
     private Renderer renderer;
     private InputHandler inputHandler;
+    private DroppedItemManager droppedItemManager;
 
     /** Ordered list of all active game systems; iterated every frame. */
     private final List<GameSystem> systems = new ArrayList<>();
@@ -139,6 +141,11 @@ public class Game {
         mobManager.spawnInitial(player.getPosition());
         renderer.setMobManager(mobManager);
 
+        // Dropped-item manager – handles item pickup and world drops
+        droppedItemManager = new DroppedItemManager(world);
+        player.setDroppedItemManager(droppedItemManager);
+        renderer.setDroppedItemManager(droppedItemManager);
+
         // Restore the last saved world (if one exists)
         if (Files.exists(SAVE_FILE)) {
             try {
@@ -178,6 +185,11 @@ public class Game {
         // Mob AI / physics update – must run before the renderer draws them
         systems.add(mobManager);
 
+        // Dropped-item physics / pickup – must run before the renderer draws them
+        systems.add(new GameSystem() {
+            @Override public void update(float dt) { droppedItemManager.update(dt, player); }
+        });
+
         // Rendering – runs last each frame, cleanup frees GPU resources
         systems.add(new GameSystem() {
             @Override public void update(float dt) {
@@ -203,12 +215,24 @@ public class Game {
 
             glfwPollEvents();
 
-            // Escape toggles cursor capture (first-person look vs. free cursor)
+            // Escape toggles cursor capture; also closes inventory if open
             if (inputHandler.isActionJustPressed(InputAction.TOGGLE_CURSOR)) {
-                cursorCaptured = !cursorCaptured;
+                if (player.isInventoryOpen()) {
+                    player.closeInventory();
+                    cursorCaptured = true;
+                } else {
+                    cursorCaptured = !cursorCaptured;
+                    player.setMouseCaptured(cursorCaptured);
+                }
                 glfwSetInputMode(window, GLFW_CURSOR,
                     cursorCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-                player.setMouseCaptured(cursorCaptured);
+            }
+
+            // Sync GLFW cursor state with inventory open state
+            boolean wantCapture = !player.isInventoryOpen() && cursorCaptured;
+            int glfwMode = wantCapture ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+            if (wantCapture != (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)) {
+                glfwSetInputMode(window, GLFW_CURSOR, glfwMode);
             }
 
             // Save world when Enter is pressed

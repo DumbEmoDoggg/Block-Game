@@ -22,9 +22,10 @@ import static org.lwjgl.glfw.GLFW.*;
  */
 public class InputHandler {
 
-    private final Set<Integer> keysDown        = new HashSet<>();
-    private final Set<Integer> keysJustPressed = new HashSet<>();
-    private final Set<Integer> mouseDown       = new HashSet<>();
+    private final Set<Integer> keysDown           = new HashSet<>();
+    private final Set<Integer> keysJustPressed    = new HashSet<>();
+    private final Set<Integer> mouseDown          = new HashSet<>();
+    private final Set<Integer> mouseJustPressed   = new HashSet<>();
 
     private double mouseX, mouseY;
     private double pendingScroll;
@@ -35,8 +36,12 @@ public class InputHandler {
 
     public InputHandler(long window) {
         glfwSetMouseButtonCallback(window, (win, btn, action, mods) -> {
-            if (action == GLFW_PRESS)        mouseDown.add(btn);
-            else if (action == GLFW_RELEASE) mouseDown.remove(btn);
+            if (action == GLFW_PRESS) {
+                mouseDown.add(btn);
+                mouseJustPressed.add(btn);
+            } else if (action == GLFW_RELEASE) {
+                mouseDown.remove(btn);
+            }
         });
 
         glfwSetCursorPosCallback(window, (win, x, y) -> {
@@ -68,8 +73,11 @@ public class InputHandler {
         keyBindings.put(InputAction.HOTBAR_4,      GLFW_KEY_4);
         keyBindings.put(InputAction.HOTBAR_5,      GLFW_KEY_5);
         keyBindings.put(InputAction.HOTBAR_6,      GLFW_KEY_6);
-        keyBindings.put(InputAction.HOTBAR_7,      GLFW_KEY_7);
-        keyBindings.put(InputAction.HOTBAR_8,      GLFW_KEY_8);
+        keyBindings.put(InputAction.HOTBAR_7,       GLFW_KEY_7);
+        keyBindings.put(InputAction.HOTBAR_8,       GLFW_KEY_8);
+        keyBindings.put(InputAction.HOTBAR_9,       GLFW_KEY_9);
+        keyBindings.put(InputAction.OPEN_INVENTORY, GLFW_KEY_E);
+        keyBindings.put(InputAction.DROP_ITEM,      GLFW_KEY_Q);
 
         mouseBindings.put(InputAction.BREAK_BLOCK, GLFW_MOUSE_BUTTON_LEFT);
         mouseBindings.put(InputAction.PLACE_BLOCK, GLFW_MOUSE_BUTTON_RIGHT);
@@ -122,6 +130,7 @@ public class InputHandler {
     /** Clear one-shot state; call once at the end of each game-loop iteration. */
     public void endFrame() {
         keysJustPressed.clear();
+        mouseJustPressed.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -168,6 +177,11 @@ public class InputHandler {
     /** Returns {@code true} while the mouse button is held down. */
     public boolean isMouseButtonDown(int button) {
         return mouseDown.contains(button);
+    }
+
+    /** Returns {@code true} only in the frame the mouse button was first pressed. */
+    public boolean isMouseButtonJustPressed(int button) {
+        return mouseJustPressed.contains(button);
     }
 
     public double getMouseX()  { return mouseX; }

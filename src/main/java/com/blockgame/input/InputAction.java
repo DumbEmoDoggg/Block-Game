@@ -28,5 +28,8 @@ public enum InputAction {
     HOTBAR_5,
     HOTBAR_6,
     HOTBAR_7,
-    HOTBAR_8
+    HOTBAR_8,
+    HOTBAR_9,
+    OPEN_INVENTORY,
+    DROP_ITEM
 }

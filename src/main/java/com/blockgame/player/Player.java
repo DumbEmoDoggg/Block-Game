@@ -5,6 +5,7 @@ import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.rendering.ParticleSystem;
 import com.blockgame.world.BlockType;
+import com.blockgame.world.DroppedItemManager;
 import com.blockgame.world.World;
 import org.joml.Vector3f;
 
@@ -20,12 +21,10 @@ import java.io.IOException;
  *   <li>Mouse-look (updates {@link Camera} yaw / pitch)</li>
  *   <li>WASD + sprint movement projected onto the XZ plane</li>
  *   <li>Gravity, jumping, and simple AABB collision against the world</li>
- *   <li>Block placement (right-click) and removal (left-click)</li>
- *   <li>Hotbar selection (keys 1-8 or scroll wheel)</li>
+ *   <li>Block placement (right-click) and removal (left-click with inventory pickup)</li>
+ *   <li>Item dropping (Q) and inventory toggle (E)</li>
+ *   <li>Hotbar selection (keys 1-9 or scroll wheel)</li>
  * </ul>
- *
- * <p>All input is queried via named {@link InputAction}s so that key bindings
- * can be changed in {@link InputHandler} without touching this class.
  */
 public class Player implements Saveable {
 
@@ -46,18 +45,11 @@ public class Player implements Saveable {
     /** Minimum time between block actions in milliseconds. */
     private static final long BLOCK_COOLDOWN_MS = 200;
 
-    // Hotbar: the 8 placeable block types
-    private static final BlockType[] HOTBAR = {
-        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
-        BlockType.SNOW,  BlockType.PLANKS
-    };
-
-    // Ordered hotbar input actions matching the HOTBAR array indices
+    // Ordered hotbar input actions (9 slots)
     private static final InputAction[] HOTBAR_ACTIONS = {
         InputAction.HOTBAR_1, InputAction.HOTBAR_2, InputAction.HOTBAR_3,
         InputAction.HOTBAR_4, InputAction.HOTBAR_5, InputAction.HOTBAR_6,
-        InputAction.HOTBAR_7, InputAction.HOTBAR_8
+        InputAction.HOTBAR_7, InputAction.HOTBAR_8, InputAction.HOTBAR_9
     };
 
     // State
@@ -76,6 +68,12 @@ public class Player implements Saveable {
     private long lastBlockActionMs = 0;
     private int hotbarIndex = 0;
 
+    // Inventory
+    private final Inventory inventory = new Inventory();
+
+    // Whether the inventory screen is open (pauses 3-D interaction)
+    private boolean inventoryOpen = false;
+
     // Targeted block for highlight rendering (updated every frame)
     private boolean hasTargetedBlock    = false;
     private final int[] targetedBlock      = new int[3];
@@ -87,6 +85,9 @@ public class Player implements Saveable {
     // Optional particle system – set after construction via setParticleSystem()
     private ParticleSystem particleSystem = null;
 
+    // Optional dropped-item manager – set after construction
+    private DroppedItemManager droppedItemManager = null;
+
     // Dependencies
     private final World        world;
     private final InputHandler input;
@@ -96,6 +97,8 @@ public class Player implements Saveable {
         this.world  = world;
         this.input  = input;
         this.camera = new Camera(aspectRatio);
+
+        inventory.fillDefaultHotbar();
 
         // Spawn on top of terrain at world origin
         int spawnY = world.getTerrainHeight(0, 0) + 1;
@@ -107,11 +110,16 @@ public class Player implements Saveable {
     // -------------------------------------------------------------------------
 
     public void update(float dt) {
-        handleMouseLook();
-        handleMovement(dt);
-        updateTargetedBlock();
-        handleBlockActions();
         handleHotbarKeys();
+        handleInventoryToggle();
+
+        if (!inventoryOpen) {
+            handleMouseLook();
+            handleMovement(dt);
+            updateTargetedBlock();
+            handleBlockActions();
+            handleDropItem();
+        }
 
         // Sync camera position and orientation
         camera.setPosition(new Vector3f(position.x, position.y + EYE_HEIGHT, position.z));
@@ -270,18 +278,65 @@ public class Player implements Saveable {
                 if (particleSystem != null) {
                     particleSystem.spawn(hit[0], hit[1], hit[2], broken);
                 }
+                // Try to add to inventory; spawn dropped item if full
+                if (!inventory.addItem(broken) && droppedItemManager != null) {
+                    droppedItemManager.spawn(hit[0], hit[1], hit[2], broken);
+                }
                 lastBlockActionMs = now;
             }
         } else if (input.isActionDown(InputAction.PLACE_BLOCK)) {
             int[] adjacent = raycast(false);
             if (adjacent != null && !occupiedByPlayer(adjacent[0], adjacent[1], adjacent[2])) {
-                BlockType placed = HOTBAR[hotbarIndex];
-                world.setBlock(adjacent[0], adjacent[1], adjacent[2], placed);
-                if (placed.behavior != null) {
-                    placed.behavior.onPlace(world, adjacent[0], adjacent[1], adjacent[2]);
+                BlockType placed = inventory.getHotbarBlock(hotbarIndex);
+                if (placed != BlockType.AIR) {
+                    world.setBlock(adjacent[0], adjacent[1], adjacent[2], placed);
+                    if (placed.behavior != null) {
+                        placed.behavior.onPlace(world, adjacent[0], adjacent[1], adjacent[2]);
+                    }
+                    inventory.consumeHotbar(hotbarIndex);
+                    lastBlockActionMs = now;
                 }
-                lastBlockActionMs = now;
             }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item drop (Q key)
+    // -------------------------------------------------------------------------
+
+    private void handleDropItem() {
+        if (!input.isActionJustPressed(InputAction.DROP_ITEM)) return;
+        BlockType held = inventory.getHotbarBlock(hotbarIndex);
+        if (held == BlockType.AIR || droppedItemManager == null) return;
+
+        if (inventory.consumeHotbar(hotbarIndex)) {
+            Vector3f dir = camera.getDirection();
+            float dropX  = position.x + dir.x * 0.5f;
+            float dropY  = position.y + EYE_HEIGHT - 0.3f;
+            float dropZ  = position.z + dir.z * 0.5f;
+            droppedItemManager.spawnThrown(dropX, dropY, dropZ, dir.x, dir.z, held);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Inventory toggle (E key)
+    // -------------------------------------------------------------------------
+
+    private void handleInventoryToggle() {
+        if (input.isActionJustPressed(InputAction.OPEN_INVENTORY)) {
+            inventoryOpen = !inventoryOpen;
+            setMouseCaptured(!inventoryOpen);
+        }
+    }
+
+    /**
+     * Externally toggle the inventory state (e.g. called from Game when
+     * Escape is pressed while inventory is open).
+     */
+    public void closeInventory() {
+        if (inventoryOpen) {
+            inventoryOpen = false;
+            setMouseCaptured(true);
         }
     }
 
@@ -420,7 +475,8 @@ public class Player implements Saveable {
     // -------------------------------------------------------------------------
 
     private void handleHotbarKeys() {
-        for (int i = 0; i < HOTBAR.length; i++) {
+        if (inventoryOpen) return;
+        for (int i = 0; i < HOTBAR_ACTIONS.length; i++) {
             if (input.isActionJustPressed(HOTBAR_ACTIONS[i])) {
                 hotbarIndex = i;
             }
@@ -428,7 +484,8 @@ public class Player implements Saveable {
         // Scroll wheel
         double scroll = input.consumeScroll();
         if (scroll != 0) {
-            hotbarIndex = Math.floorMod(hotbarIndex - (int) Math.signum(scroll), HOTBAR.length);
+            hotbarIndex = Math.floorMod(
+                hotbarIndex - (int) Math.signum(scroll), Inventory.HOTBAR_SIZE);
         }
     }
 
@@ -459,8 +516,19 @@ public class Player implements Saveable {
 
     public Vector3f  getPosition()          { return position; }
     public Camera    getCamera()             { return camera; }
-    public BlockType getSelectedBlock()      { return HOTBAR[hotbarIndex]; }
-    public BlockType[] getHotbar()           { return HOTBAR; }
+    public Inventory getInventory()          { return inventory; }
+    public boolean   isInventoryOpen()       { return inventoryOpen; }
+    public BlockType getSelectedBlock()      { return inventory.getHotbarBlock(hotbarIndex); }
+
+    /** Returns a snapshot of all 9 hotbar block types (AIR for empty slots). */
+    public BlockType[] getHotbar() {
+        BlockType[] result = new BlockType[Inventory.HOTBAR_SIZE];
+        for (int i = 0; i < Inventory.HOTBAR_SIZE; i++) {
+            result[i] = inventory.getHotbarBlock(i);
+        }
+        return result;
+    }
+
     public int       getHotbarIndex()        { return hotbarIndex; }
     public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
     public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
@@ -485,5 +553,9 @@ public class Player implements Saveable {
     public void setParticleSystem(ParticleSystem ps) {
         this.particleSystem = ps;
     }
-}
 
+    /** Connects the dropped-item manager for block pickup/drop. */
+    public void setDroppedItemManager(DroppedItemManager manager) {
+        this.droppedItemManager = manager;
+    }
+}
