@@ -18,7 +18,7 @@ public class CaveFeature implements WorldFeature {
     /**
      * @param noise the noise generator to use for cave shape; must be the
      *              same instance (or an identically-seeded one) used by the
-     *              terrain height function to avoid artefacts at the surface
+     *              terrain height function to avoid artifacts at the surface
      *              threshold.
      */
     public CaveFeature(PerlinNoise noise) {
