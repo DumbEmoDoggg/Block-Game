@@ -280,10 +280,6 @@ public class Renderer {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_CULL_FACE);
 
-        // Update the frustum from current matrices (already done by renderWorld,
-        // but re-set here so renderWater can be called independently if needed).
-        frustum.set(new Matrix4f(projection).mul(view));
-
         for (Map.Entry<Long, ChunkMesh> e : chunkMeshes.entrySet()) {
             long key = e.getKey();
             int cx = (int) (key >> 32);

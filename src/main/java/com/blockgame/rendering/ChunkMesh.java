@@ -37,6 +37,9 @@ public class ChunkMesh {
     private static final int FLOATS_PER_VERTEX = 9;
     private static final int VERTICES_PER_FACE = 6; // 2 triangles × 3 vertices
 
+    /** Triangle indices for a quad (two CCW triangles sharing vertices 0 and 2). */
+    private static final int[] TRIANGLE_INDICES = {0, 1, 2, 0, 2, 3};
+
     // Solid-block mesh
     private int vao = 0;
     private int vbo = 0;
@@ -360,7 +363,7 @@ public class ChunkMesh {
         float[] normal = normal(face);
 
         // Two triangles: indices 0,1,2 and 0,2,3
-        for (int i : new int[]{0, 1, 2, 0, 2, 3}) {
+        for (int i : TRIANGLE_INDICES) {
             buf.add(quad[i * 3]);
             buf.add(quad[i * 3 + 1]);
             buf.add(quad[i * 3 + 2]);
@@ -393,7 +396,7 @@ public class ChunkMesh {
         float[] quad   = quad(x, y, z, face);
         float[] normal = normal(face);
 
-        for (int i : new int[]{0, 1, 2, 0, 2, 3}) {
+        for (int i : TRIANGLE_INDICES) {
             buf.add(quad[i * 3]);
             buf.add(quad[i * 3 + 1]);
             buf.add(quad[i * 3 + 2]);
