@@ -67,28 +67,8 @@ function Get-LocalVersion {
 
 function Invoke-Download([string]$url, [string]$dest) {
     Write-Status "Downloading update..."
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add('User-Agent', 'BlockGame-Launcher')
-
-    # Show a simple byte-count progress (no external cmdlets needed)
-    $wc.add_DownloadProgressChanged({
-        param($s, $e)
-        $pct = $e.ProgressPercentage
-        if ($pct -ge 0) {
-            $mb = [math]::Round($e.BytesReceived / 1MB, 1)
-            Write-Progress -Activity 'Downloading Block Game' `
-                           -Status "${pct}%  (${mb} MB)" `
-                           -PercentComplete $pct
-        }
-    })
-
-    $done = $false
-    $wc.add_DownloadFileCompleted({ $done = $true })
-    $wc.DownloadFileAsync([uri]$url, $dest)
-
-    while (-not $done) { Start-Sleep -Milliseconds 200 }
-    Write-Progress -Activity 'Downloading Block Game' -Completed
-    $wc.Dispose()
+    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing `
+                      -Headers @{ 'User-Agent' = 'BlockGame-Launcher' }
 }
 
 function Expand-Bundle([string]$zipPath) {
