@@ -58,7 +58,7 @@ public class ChunkMesh {
      */
     public void build(Chunk chunk, World world, int lod) {
         if (lod >= 1) {
-            buildSurface(chunk);
+            buildSurface(chunk, world);
         } else {
             buildFull(chunk, world);
         }
@@ -111,32 +111,114 @@ public class ChunkMesh {
     // -------------------------------------------------------------------------
 
     /**
-     * Builds a surface-only mesh: for each column in the chunk, only the top
-     * face of the topmost solid block is emitted.  This is used for distant
-     * chunks where underground and side-face detail is imperceptible.
+     * Builds a surface-only mesh: for each column in the chunk, the top face of
+     * the topmost solid block is emitted.  Additionally, side faces are emitted
+     * wherever a neighbouring column's surface is lower than this column's
+     * surface, so that vertical terrain walls are visible rather than
+     * transparent.
+     *
+     * <p>Cross-chunk neighbour lookups are performed via {@code world} so that
+     * chunk-boundary edges are handled correctly.
      */
-    private void buildSurface(Chunk chunk) {
+    private void buildSurface(Chunk chunk, World world) {
+        // Pre-compute the surface height (index of the topmost solid block, or
+        // -1 for a fully-air column) for every column in this chunk.
+        int[][] surfaceHeights = new int[Chunk.SIZE][Chunk.SIZE];
+        for (int lx = 0; lx < Chunk.SIZE; lx++) {
+            for (int lz = 0; lz < Chunk.SIZE; lz++) {
+                surfaceHeights[lx][lz] = findSurfaceHeight(chunk, lx, lz);
+            }
+        }
+
         List<Float> buf = new ArrayList<>(Chunk.SIZE * Chunk.SIZE * FLOATS_PER_VERTEX * VERTICES_PER_FACE);
 
         for (int lx = 0; lx < Chunk.SIZE; lx++) {
             for (int lz = 0; lz < Chunk.SIZE; lz++) {
-                // Find the topmost solid block in this column
-                for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
-                    BlockType block = chunk.getBlock(lx, ly, lz);
-                    if (block.solid) {
-                        int wx = chunk.getWorldX(lx);
-                        int wz = chunk.getWorldZ(lz);
-                        // Surface blocks are always sky-lit in the LOD mesh
-                        addFace(buf, wx, ly, wz, Face.TOP, block, 1.0f);
-                        break;
-                    }
-                }
+                int surfaceY = surfaceHeights[lx][lz];
+                if (surfaceY < 0) continue;
+
+                int wx = chunk.getWorldX(lx);
+                int wz = chunk.getWorldZ(lz);
+
+                // Top face of the surface block (always sky-lit in the LOD mesh)
+                addFace(buf, wx, surfaceY, wz, Face.TOP, chunk.getBlock(lx, surfaceY, lz), 1.0f);
+
+                // Side faces: emit wherever the adjacent column is lower so that
+                // the vertical terrain wall is not invisible.
+                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.NORTH);
+                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.SOUTH);
+                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.WEST);
+                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.EAST);
             }
         }
 
         float[] data = new float[buf.size()];
         for (int i = 0; i < buf.size(); i++) data[i] = buf.get(i);
         upload(data);
+    }
+
+    /**
+     * Returns the Y index of the topmost solid block in the given local column,
+     * or {@code -1} if the column contains no solid blocks.
+     */
+    private int findSurfaceHeight(Chunk chunk, int lx, int lz) {
+        for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
+            if (chunk.getBlock(lx, ly, lz).solid) return ly;
+        }
+        return -1;
+    }
+
+    /**
+     * Returns the surface height of the neighbouring column that lies one step
+     * in the direction encoded by {@code (dlx, dlz)} from the local position
+     * {@code (lx, lz)}.  Uses the pre-computed {@code surfaceHeights} table for
+     * in-chunk neighbours and queries {@code world} for cross-chunk neighbours.
+     */
+    private int neighborSurfaceHeight(Chunk chunk, World world,
+                                      int nlx, int nlz, int[][] surfaceHeights) {
+        // In-chunk fast path
+        if (nlx >= 0 && nlx < Chunk.SIZE && nlz >= 0 && nlz < Chunk.SIZE) {
+            return surfaceHeights[nlx][nlz];
+        }
+        // Cross-chunk: scan downward through the world
+        int wx = chunk.getWorldX(nlx);
+        int wz = chunk.getWorldZ(nlz);
+        for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
+            if (world.getBlock(wx, ly, wz).solid) return ly;
+        }
+        return -1;
+    }
+
+    /**
+     * Emits side faces on the given {@code face} side of the column at
+     * {@code (lx, lz)} for each Y level that is exposed because the adjacent
+     * column's surface is lower.
+     */
+    private void addLodSideFaces(List<Float> buf, Chunk chunk, World world,
+                                  int lx, int lz, int surfaceY, int[][] surfaceHeights,
+                                  Face face) {
+        int nlx = lx, nlz = lz;
+        switch (face) {
+            case NORTH: nlz = lz - 1; break;
+            case SOUTH: nlz = lz + 1; break;
+            case WEST:  nlx = lx - 1; break;
+            case EAST:  nlx = lx + 1; break;
+            default: return;
+        }
+
+        int neighborY = neighborSurfaceHeight(chunk, world, nlx, nlz, surfaceHeights);
+        if (neighborY >= surfaceY) return; // neighbour is at the same level or higher
+
+        int wx = chunk.getWorldX(lx);
+        int wz = chunk.getWorldZ(lz);
+        // Emit a face for each block level that is above the neighbour's surface
+        int fromY = neighborY + 1;
+        for (int y = fromY; y <= surfaceY; y++) {
+            BlockType block = chunk.getBlock(lx, y, lz);
+            if (block.solid) {
+                addFace(buf, wx, y, wz, face, block, 1.0f);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
