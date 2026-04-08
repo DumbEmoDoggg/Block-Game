@@ -79,6 +79,15 @@ public class ChunkMesh {
     private void buildFull(Chunk chunk, World world) {
         List<Float> buf = new ArrayList<>(4096);
 
+        // Pre-compute the surface height per column so that computeSkyLight can
+        // determine depth-from-surface in O(1) rather than scanning upward each time.
+        int[][] surfaceHeights = new int[Chunk.SIZE][Chunk.SIZE];
+        for (int lx = 0; lx < Chunk.SIZE; lx++) {
+            for (int lz = 0; lz < Chunk.SIZE; lz++) {
+                surfaceHeights[lx][lz] = findSurfaceHeight(chunk, lx, lz);
+            }
+        }
+
         for (int lx = 0; lx < Chunk.SIZE; lx++) {
             for (int ly = 0; ly < Chunk.HEIGHT; ly++) {
                 for (int lz = 0; lz < Chunk.SIZE; lz++) {
@@ -88,7 +97,7 @@ public class ChunkMesh {
                     int wx = chunk.getWorldX(lx);
                     int wz = chunk.getWorldZ(lz);
 
-                    float skyLight = computeSkyLight(chunk, lx, ly, lz);
+                    float skyLight = computeSkyLight(ly, surfaceHeights[lx][lz]);
 
                     // Emit a face only when the adjacent block is transparent
                     if (isTransparent(world, chunk, lx, ly + 1, lz)) addFace(buf, wx, ly, wz, Face.TOP,    block, skyLight);
@@ -242,15 +251,28 @@ public class ChunkMesh {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns 1.0 if the block column above (lx, ly, lz) is clear all the way
-     * to the top of the chunk (i.e. the block is exposed to skylight), or 0.0
-     * if any solid block sits above it (i.e. the block is underground/in a cave).
+     * Returns the sky-light level for a block at height {@code ly} whose
+     * column's topmost solid block (the terrain surface) is at {@code surfaceY}.
+     *
+     * <p>Blocks at or above the surface receive full sky light (1.0).  Blocks
+     * below the surface receive a brightness that fades linearly with depth so
+     * that hillside faces transition smoothly from bright at the surface to
+     * cave darkness underground, eliminating the harsh horizontal banding that a
+     * binary 0/1 value produces.  Blocks more than {@code SKY_LIGHT_FADE_DEPTH}
+     * levels below the surface receive 0.0 (cave darkness).
+     *
+     * @param ly       the Y coordinate of the block being lit
+     * @param surfaceY the Y coordinate of the topmost solid block in this column
+     *                 (as returned by {@link #findSurfaceHeight}), or {@code -1}
+     *                 for a fully-air column
      */
-    private float computeSkyLight(Chunk chunk, int lx, int ly, int lz) {
-        for (int y = ly + 1; y < Chunk.HEIGHT; y++) {
-            if (!chunk.getBlock(lx, y, lz).isTransparent()) return 0.0f;
-        }
-        return 1.0f;
+    private static final int   SKY_LIGHT_FADE_DEPTH = 4;
+    private static final float SKY_LIGHT_FADE_STEP  = 1.0f / SKY_LIGHT_FADE_DEPTH;
+
+    private float computeSkyLight(int ly, int surfaceY) {
+        if (surfaceY < 0 || ly > surfaceY) return 1.0f; // fully sky-exposed
+        int depth = surfaceY - ly;
+        return Math.max(0.0f, 1.0f - depth * SKY_LIGHT_FADE_STEP);
     }
 
     // -------------------------------------------------------------------------
