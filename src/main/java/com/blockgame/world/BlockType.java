@@ -8,9 +8,13 @@ package com.blockgame.world;
  *   <li>a unique integer id used for compact in-chunk storage</li>
  *   <li>RGB colour components for the top face (and for solid-colour blocks, all faces)</li>
  *   <li>a {@code solid} flag controlling collision and face-culling</li>
+ *   <li>an optional {@link BlockBehavior} for interactive / dynamic blocks</li>
  * </ul>
  *
  * <p>New block types can be added here without touching any other class.
+ * To give a block special behaviour (gravity, fluid flow, crop growth, …),
+ * pass a {@link BlockBehavior} implementation as the final constructor
+ * argument.
  */
 public enum BlockType {
 
@@ -43,13 +47,25 @@ public enum BlockType {
      */
     public final boolean transparent;
 
+    /**
+     * Optional lifecycle callbacks for this block type (place, break, tick).
+     * {@code null} for blocks with no special behaviour (the common case).
+     */
+    public final BlockBehavior behavior;
+
     BlockType(int id, float r, float g, float b, boolean solid, boolean transparent) {
+        this(id, r, g, b, solid, transparent, null);
+    }
+
+    BlockType(int id, float r, float g, float b, boolean solid, boolean transparent,
+              BlockBehavior behavior) {
         this.id          = id;
         this.r           = r;
         this.g           = g;
         this.b           = b;
         this.solid       = solid;
         this.transparent = transparent;
+        this.behavior    = behavior;
     }
 
     /** @return {@code true} if light and geometry can pass through this block. */

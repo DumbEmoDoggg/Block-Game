@@ -1,32 +1,47 @@
 package com.blockgame.world;
 
+import com.blockgame.Saveable;
 import org.joml.Vector3f;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * The game world: an infinite grid of {@link Chunk}s loaded around the player.
  *
  * <p>Terrain is generated procedurally using multi-octave Perlin noise (fBm).
+ * Generation is split into a {@link WorldGenerator} (base terrain) and an
+ * ordered list of {@link WorldFeature}s (decoration passes such as caves).
+ * The active {@link BiomeProvider} controls surface block selection.
  */
-public class World {
+public class World implements Saveable {
 
     /** How many chunks to keep loaded in each direction from the player chunk. */
     public static final int RENDER_DISTANCE = 25;
 
     private final Map<Long, Chunk> chunks = new HashMap<>();
+
+    // Noise generator shared with world features so identical seeds produce
+    // identical terrain regardless of which object samples first.
     private final PerlinNoise noise = new PerlinNoise(12345L);
 
+    // Modular generation pipeline
+    private final BiomeProvider   biomeProvider;
+    private final WorldGenerator  generator;
+    private final List<WorldFeature> features;
+
     public World() {
+        this.biomeProvider = new DefaultBiomeProvider(this);
+        this.generator     = new DefaultWorldGenerator();
+        this.features      = new ArrayList<>();
+        this.features.add(new CaveFeature(noise));
+
         // Pre-generate the initial area so the player lands on solid ground
         for (int cx = -RENDER_DISTANCE; cx <= RENDER_DISTANCE; cx++) {
             for (int cz = -RENDER_DISTANCE; cz <= RENDER_DISTANCE; cz++) {
@@ -72,67 +87,11 @@ public class World {
     // -------------------------------------------------------------------------
 
     private void generateChunk(Chunk chunk) {
-        for (int lx = 0; lx < Chunk.SIZE; lx++) {
-            for (int lz = 0; lz < Chunk.SIZE; lz++) {
-                int wx = chunk.getWorldX(lx);
-                int wz = chunk.getWorldZ(lz);
-
-                int surfaceY = getTerrainHeight(wx, wz);
-
-                // Bedrock / stone base
-                for (int y = 0; y < surfaceY - 4; y++) {
-                    chunk.setBlock(lx, y, lz, BlockType.STONE);
-                }
-                // Dirt layer
-                for (int y = Math.max(0, surfaceY - 4); y < surfaceY - 1; y++) {
-                    chunk.setBlock(lx, y, lz, BlockType.DIRT);
-                }
-                // Surface block
-                if (surfaceY > 0) {
-                    BlockType surface;
-                    if (surfaceY > 80) {
-                        surface = BlockType.SNOW;
-                    } else if (surfaceY < 50) {
-                        surface = BlockType.SAND;  // beach / desert low-land
-                    } else {
-                        surface = BlockType.GRASS;
-                    }
-                    chunk.setBlock(lx, surfaceY - 1, lz, surface);
-                }
-            }
+        generator.generate(chunk, this);
+        for (WorldFeature feature : features) {
+            feature.apply(chunk, this);
         }
-        carveCaves(chunk);
         chunk.setDirty(true);
-    }
-
-    /**
-     * Carves cave tunnels into the chunk using a pair of 3-D noise fields.
-     *
-     * <p>A block is carved out wherever both noise samples are near zero
-     * simultaneously, which creates worm-like tunnels through the terrain.
-     * Carving is skipped within a few blocks of the surface to preserve the
-     * natural terrain shape, and leaves a solid bedrock layer at y = 0-3.
-     */
-    private void carveCaves(Chunk chunk) {
-        for (int lx = 0; lx < Chunk.SIZE; lx++) {
-            for (int lz = 0; lz < Chunk.SIZE; lz++) {
-                int wx = chunk.getWorldX(lx);
-                int wz = chunk.getWorldZ(lz);
-                int surfaceY = getTerrainHeight(wx, wz);
-
-                for (int y = 4; y < surfaceY - 5; y++) {
-                    if (chunk.getBlock(lx, y, lz) == BlockType.AIR) continue;
-
-                    double n1 = noise.octaveNoise3(wx * 0.04, y * 0.04, wz * 0.04,        2, 0.5, 2.0);
-                    double n2 = noise.octaveNoise3(wx * 0.04 + 100, y * 0.04 + 100, wz * 0.04 + 100, 2, 0.5, 2.0);
-
-                    // Carve when both noise values are near zero (worm-tunnel condition)
-                    if (n1 * n1 + n2 * n2 < 0.04) {
-                        chunk.setBlock(lx, y, lz, BlockType.AIR);
-                    }
-                }
-            }
-        }
     }
 
     /**
@@ -155,6 +114,11 @@ public class World {
         double detail = noise.octaveNoise(wx * 0.020, wz * 0.020, 4, 0.45, 2.0) * 0.15;
         double h = 65.0 + (steep + hills + detail) * 30.0;
         return (int) Math.max(2, h);
+    }
+
+    /** Returns the active {@link BiomeProvider} used during world generation. */
+    public BiomeProvider getBiomeProvider() {
+        return biomeProvider;
     }
 
     // -------------------------------------------------------------------------
@@ -221,69 +185,46 @@ public class World {
     }
 
     // -------------------------------------------------------------------------
-    // Save / Load
+    // Saveable – chunk data only; player position is saved separately
     // -------------------------------------------------------------------------
 
     /**
-     * Serialises all currently loaded chunks and the player position to a
-     * binary file.
+     * Writes all currently loaded chunks to {@code out}.
      *
      * <p>Format:
      * <pre>
-     *   int   chunkCount
+     *   int  chunkCount
      *   for each chunk:
      *     int  chunkX
      *     int  chunkZ
-     *     byte[SIZE * HEIGHT * SIZE]  block data (lx outer, y middle, lz inner)
-     *   float  playerX
-     *   float  playerY
-     *   float  playerZ
+     *     byte[SIZE * HEIGHT * SIZE]  block data
      * </pre>
-     *
-     * @param file      destination file (parent directories are created if absent)
-     * @param playerPos current player position to persist
-     * @throws IOException on any I/O error
      */
-    public void save(Path file, Vector3f playerPos) throws IOException {
-        Files.createDirectories(file.getParent());
-        try (DataOutputStream out = new DataOutputStream(
-                new BufferedOutputStream(Files.newOutputStream(file)))) {
-            out.writeInt(chunks.size());
-            for (Chunk chunk : chunks.values()) {
-                out.writeInt(chunk.chunkX);
-                out.writeInt(chunk.chunkZ);
-                chunk.saveToStream(out);
-            }
-            out.writeFloat(playerPos.x);
-            out.writeFloat(playerPos.y);
-            out.writeFloat(playerPos.z);
+    @Override
+    public void save(DataOutputStream out) throws IOException {
+        out.writeInt(chunks.size());
+        for (Chunk chunk : chunks.values()) {
+            out.writeInt(chunk.chunkX);
+            out.writeInt(chunk.chunkZ);
+            chunk.saveToStream(out);
         }
     }
 
     /**
-     * Replaces the current world state with data read from {@code file}.
+     * Replaces the current world state with chunks read from {@code in}.
      * Any previously loaded chunks are discarded.
-     *
-     * @param file source file written by {@link #save}
-     * @return the player position that was stored in the save file
-     * @throws IOException on any I/O error
      */
-    public Vector3f load(Path file) throws IOException {
+    @Override
+    public void load(DataInputStream in) throws IOException {
         chunks.clear();
-        try (DataInputStream in = new DataInputStream(
-                new BufferedInputStream(Files.newInputStream(file)))) {
-            int count = in.readInt();
-            for (int i = 0; i < count; i++) {
-                int cx = in.readInt();
-                int cz = in.readInt();
-                Chunk chunk = new Chunk(cx, cz);
-                chunk.loadFromStream(in);
-                chunks.put(chunkKey(cx, cz), chunk);
-            }
-            float px = in.readFloat();
-            float py = in.readFloat();
-            float pz = in.readFloat();
-            return new Vector3f(px, py, pz);
+        int count = in.readInt();
+        for (int i = 0; i < count; i++) {
+            int cx = in.readInt();
+            int cz = in.readInt();
+            Chunk chunk = new Chunk(cx, cz);
+            chunk.loadFromStream(in);
+            chunks.put(chunkKey(cx, cz), chunk);
         }
     }
 }
+

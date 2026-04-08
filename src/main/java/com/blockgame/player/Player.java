@@ -1,11 +1,15 @@
 package com.blockgame.player;
 
+import com.blockgame.Saveable;
+import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.world.BlockType;
 import com.blockgame.world.World;
 import org.joml.Vector3f;
 
-import static org.lwjgl.glfw.GLFW.*;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 
 /**
  * First-person player controller.
@@ -16,10 +20,13 @@ import static org.lwjgl.glfw.GLFW.*;
  *   <li>WASD + sprint movement projected onto the XZ plane</li>
  *   <li>Gravity, jumping, and simple AABB collision against the world</li>
  *   <li>Block placement (right-click) and removal (left-click)</li>
- *   <li>Hotbar selection (keys 1-7 or scroll wheel)</li>
+ *   <li>Hotbar selection (keys 1-8 or scroll wheel)</li>
  * </ul>
+ *
+ * <p>All input is queried via named {@link InputAction}s so that key bindings
+ * can be changed in {@link InputHandler} without touching this class.
  */
-public class Player {
+public class Player implements Saveable {
 
     // Physics constants
     private static final float MOVE_SPEED    = 5.0f;
@@ -38,6 +45,20 @@ public class Player {
     /** Minimum time between block actions in milliseconds. */
     private static final long BLOCK_COOLDOWN_MS = 200;
 
+    // Hotbar: the 8 placeable block types
+    private static final BlockType[] HOTBAR = {
+        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
+        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
+        BlockType.SNOW,  BlockType.PLANKS
+    };
+
+    // Ordered hotbar input actions matching the HOTBAR array indices
+    private static final InputAction[] HOTBAR_ACTIONS = {
+        InputAction.HOTBAR_1, InputAction.HOTBAR_2, InputAction.HOTBAR_3,
+        InputAction.HOTBAR_4, InputAction.HOTBAR_5, InputAction.HOTBAR_6,
+        InputAction.HOTBAR_7, InputAction.HOTBAR_8
+    };
+
     // State
     private final Vector3f position    = new Vector3f(0, 72, 0);
     private float           velocityY  = 0f;
@@ -52,19 +73,12 @@ public class Player {
 
     // Block interaction
     private long lastBlockActionMs = 0;
+    private int hotbarIndex = 0;
 
     // Targeted block for highlight rendering (updated every frame)
     private boolean hasTargetedBlock    = false;
     private final int[] targetedBlock      = new int[3];
     private final int[] targetedFaceNormal = new int[3];
-
-    // Hotbar: the 8 placeable block types
-    private static final BlockType[] HOTBAR = {
-        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
-        BlockType.SNOW,  BlockType.PLANKS
-    };
-    private int hotbarIndex = 0;
 
     // Whether the mouse cursor is captured (first-person look active)
     private boolean mouseCaptured = true;
@@ -134,7 +148,7 @@ public class Player {
     // -------------------------------------------------------------------------
 
     private void handleMovement(float dt) {
-        boolean sprinting = input.isKeyDown(GLFW_KEY_LEFT_CONTROL);
+        boolean sprinting = input.isActionDown(InputAction.SPRINT);
         float speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
 
         float yr = (float) Math.toRadians(yaw);
@@ -143,10 +157,10 @@ public class Player {
 
         float moveX = 0, moveZ = 0;
 
-        if (input.isKeyDown(GLFW_KEY_W)) { moveX += sinY;  moveZ -= cosY; }
-        if (input.isKeyDown(GLFW_KEY_S)) { moveX -= sinY;  moveZ += cosY; }
-        if (input.isKeyDown(GLFW_KEY_A)) { moveX -= cosY;  moveZ -= sinY; }
-        if (input.isKeyDown(GLFW_KEY_D)) { moveX += cosY;  moveZ += sinY; }
+        if (input.isActionDown(InputAction.MOVE_FORWARD))  { moveX += sinY;  moveZ -= cosY; }
+        if (input.isActionDown(InputAction.MOVE_BACKWARD)) { moveX -= sinY;  moveZ += cosY; }
+        if (input.isActionDown(InputAction.MOVE_LEFT))     { moveX -= cosY;  moveZ -= sinY; }
+        if (input.isActionDown(InputAction.MOVE_RIGHT))    { moveX += cosY;  moveZ += sinY; }
 
         // Normalise diagonal movement
         float len = (float) Math.sqrt(moveX * moveX + moveZ * moveZ);
@@ -159,7 +173,7 @@ public class Player {
         moveZ *= speed * dt;
 
         // Jump
-        if (input.isKeyDown(GLFW_KEY_SPACE) && onGround) {
+        if (input.isActionDown(InputAction.JUMP) && onGround) {
             velocityY = JUMP_VELOCITY;
             onGround  = false;
         }
@@ -240,16 +254,24 @@ public class Player {
         long now = System.currentTimeMillis();
         if (now - lastBlockActionMs < BLOCK_COOLDOWN_MS) return;
 
-        if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (input.isActionDown(InputAction.BREAK_BLOCK)) {
             int[] hit = raycast(true);
             if (hit != null) {
+                BlockType broken = world.getBlock(hit[0], hit[1], hit[2]);
                 world.setBlock(hit[0], hit[1], hit[2], BlockType.AIR);
+                if (broken.behavior != null) {
+                    broken.behavior.onBreak(world, hit[0], hit[1], hit[2]);
+                }
                 lastBlockActionMs = now;
             }
-        } else if (input.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+        } else if (input.isActionDown(InputAction.PLACE_BLOCK)) {
             int[] adjacent = raycast(false);
             if (adjacent != null && !occupiedByPlayer(adjacent[0], adjacent[1], adjacent[2])) {
-                world.setBlock(adjacent[0], adjacent[1], adjacent[2], HOTBAR[hotbarIndex]);
+                BlockType placed = HOTBAR[hotbarIndex];
+                world.setBlock(adjacent[0], adjacent[1], adjacent[2], placed);
+                if (placed.behavior != null) {
+                    placed.behavior.onPlace(world, adjacent[0], adjacent[1], adjacent[2]);
+                }
                 lastBlockActionMs = now;
             }
         }
@@ -391,7 +413,7 @@ public class Player {
 
     private void handleHotbarKeys() {
         for (int i = 0; i < HOTBAR.length; i++) {
-            if (input.isKeyJustPressed(GLFW_KEY_1 + i)) {
+            if (input.isActionJustPressed(HOTBAR_ACTIONS[i])) {
                 hotbarIndex = i;
             }
         }
@@ -400,6 +422,27 @@ public class Player {
         if (scroll != 0) {
             hotbarIndex = Math.floorMod(hotbarIndex - (int) Math.signum(scroll), HOTBAR.length);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Saveable – player position persisted across sessions
+    // -------------------------------------------------------------------------
+
+    /** Writes the player's current position to {@code out}. */
+    @Override
+    public void save(DataOutputStream out) throws IOException {
+        out.writeFloat(position.x);
+        out.writeFloat(position.y);
+        out.writeFloat(position.z);
+    }
+
+    /** Reads and applies a previously saved player position from {@code in}. */
+    @Override
+    public void load(DataInputStream in) throws IOException {
+        float px = in.readFloat();
+        float py = in.readFloat();
+        float pz = in.readFloat();
+        position.set(px, py, pz);
     }
 
     // -------------------------------------------------------------------------
@@ -430,3 +473,4 @@ public class Player {
         position.set(x, y, z);
     }
 }
+
