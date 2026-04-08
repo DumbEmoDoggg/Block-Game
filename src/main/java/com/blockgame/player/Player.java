@@ -79,6 +79,10 @@ public class Player implements Saveable {
     private final int[] targetedBlock      = new int[3];
     private final int[] targetedFaceNormal = new int[3];
 
+    // Health system
+    private static final int MAX_HEALTH = 20; // 20 HP = 10 hearts
+    private int health = MAX_HEALTH;
+
     // Whether the mouse cursor is captured (first-person look active)
     private boolean mouseCaptured = true;
 
@@ -532,6 +536,34 @@ public class Player implements Saveable {
     public int       getHotbarIndex()        { return hotbarIndex; }
     public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
     public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
+
+    // -------------------------------------------------------------------------
+    // Health system
+    // -------------------------------------------------------------------------
+
+    /** Returns the player's current health (0–{@link #MAX_HEALTH}). */
+    public int getHealth() { return health; }
+
+    /** Returns the player's maximum health. */
+    public int getMaxHealth() { return MAX_HEALTH; }
+
+    /**
+     * Reduces the player's health by {@code amount} (clamped to 0).
+     *
+     * @param amount positive damage value
+     */
+    public void damage(int amount) {
+        health = Math.max(0, health - amount);
+    }
+
+    /**
+     * Restores the player's health by {@code amount} (clamped to {@link #MAX_HEALTH}).
+     *
+     * @param amount positive heal value
+     */
+    public void heal(int amount) {
+        health = Math.min(MAX_HEALTH, health + amount);
+    }
 
     /**
      * Enables or disables first-person mouse look (cursor capture).

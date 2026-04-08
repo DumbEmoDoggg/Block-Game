@@ -37,7 +37,7 @@ public class Camera {
         projectionMatrix.identity().perspective(
             (float) Math.toRadians(70.0),
             aspectRatio,
-            0.05f,
+            0.1f,
             1200.0f
         );
     }

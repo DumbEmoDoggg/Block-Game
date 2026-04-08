@@ -93,6 +93,17 @@ public class Renderer {
     private int hotbarTexId;
     private static final int HOTBAR_SLOTS = 9;
 
+    // GUI scale: each texture pixel occupies this many screen pixels
+    private static final float GUI_SCALE = 2.0f;
+    // Minecraft-style hotbar texture dimensions (hotbar.png is 182×22, 9 slots à 20px + 1px borders)
+    private static final float SLOT_TEX_PX    = 20.0f; // one slot = 20×20 px in texture
+    private static final float BORDER_TEX_PX  =  1.0f; // outer border thickness in texture pixels
+    private static final float HOTBAR_TEX_PX_H = 22.0f; // hotbar.png height in texture pixels
+    /** Distance from the bottom of the screen to the bottom of the hotbar, in screen pixels. */
+    private static final float HOTBAR_BOTTOM_PX = 6.0f;
+    // UV end for 8-slot crop of the 9-slot hotbar.png: (1 + 8*20 + 1) / 182 = 162/182
+    private static final float HOTBAR_UV_END = 162.0f / 182.0f;
+
     // Hotbar icon geometry (textured quads over each slot)
     private int iconVao, iconVbo;
 
@@ -113,7 +124,20 @@ public class Renderer {
     private static final int MAX_DROPPED_ITEM_VERTS = 2048 * 6; // up to 2048 items × 2 tris
     private DroppedItemManager droppedItemManager = null;
 
+    // Heart textures (full.png = whole heart, half.png = half heart)
+    private int fullHeartTexId, halfHeartTexId;
+    // VAO/VBO for the heart bar (rendered every frame – dynamic)
+    private int heartVao, heartVbo;
+    // Number of heart icons displayed (Minecraft standard = 10)
+    private static final int HEART_COUNT = 10;
+    // Natural size of each heart sprite in texture pixels (9×9)
+    private static final float HEART_TEX_PX = 9.0f;
+    // Gap between consecutive heart sprites, in texture pixels
+    private static final float HEART_GAP_PX = 1.0f;
+
     private int viewportW, viewportH;
+    // Tracks the viewport dimensions at which the hotbar background geometry was last built
+    private int hotbarGeomViewportW, hotbarGeomViewportH;
 
     public Renderer(long window, World world, Player player) {
         this.window = window;
@@ -147,19 +171,24 @@ public class Renderer {
         buildInventoryOverlay();
         buildDroppedItemVao();
 
-        // Load GUI overlay images (crosshair + hotbar background)
+        // Load GUI overlay images (crosshair, hotbar background, hearts)
         crosshairTexId  = loadGuiTexture("crosshair");
         hotbarTexId     = loadGuiTexture("hotbar");
         inventoryTexId  = loadGuiTexture("inventory");
-        buildHotbarImage();
+        fullHeartTexId  = loadGuiTexture("full");
+        halfHeartTexId  = loadGuiTexture("half");
 
-        // Read initial framebuffer size
+        // Read initial framebuffer size BEFORE building viewport-dependent geometry
         IntBuffer w = BufferUtils.createIntBuffer(1);
         IntBuffer h = BufferUtils.createIntBuffer(1);
         glfwGetFramebufferSize(window, w, h);
         viewportW = w.get(0);
         viewportH = h.get(0);
         glViewport(0, 0, viewportW, viewportH);
+
+        // Build viewport-dependent geometry now that viewportW/H are set
+        buildHotbarImage();
+        buildHearts();
 
         player.getCamera().updateProjection((float) viewportW / viewportH);
 
@@ -457,10 +486,18 @@ public class Renderer {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+
         // --- Hotbar image background (textured quad using GUI/hotbar.png) ---
         if (hotbarTexId != 0) {
-            iconShader.use();
-            iconShader.setInt("uIcons", 0);
+            // Re-upload hotbar geometry only when the viewport dimensions change
+            if (viewportW != hotbarGeomViewportW || viewportH != hotbarGeomViewportH) {
+                updateHotbarImage();
+                hotbarGeomViewportW = viewportW;
+                hotbarGeomViewportH = viewportH;
+            }
+            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, hotbarTexId);
             glBindVertexArray(hotbarImageVao);
@@ -477,15 +514,20 @@ public class Renderer {
         updateIconHotbar();
         iconShader.use();
         iconShader.setInt("uIcons", 0);
+        iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
         glActiveTexture(GL_TEXTURE0);
         textureAtlas.bindIcons();
         glBindVertexArray(iconVao);
         glDrawArrays(GL_TRIANGLES, 0, HOTBAR_SLOTS * 2 * 3);
 
+        // --- Health hearts (above the hotbar, left-aligned) ---
+        renderHearts();
+
         // --- Crosshair image (textured quad using GUI/crosshair.png) ---
         if (crosshairTexId != 0) {
             iconShader.use();
             iconShader.setInt("uIcons", 0);
+            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, crosshairTexId);
             glBindVertexArray(crosshairVao);
@@ -578,20 +620,30 @@ public class Renderer {
     }
 
     /**
-     * Fills {@code fb} with a single white quad covering the selected slot.
+     * Fills {@code fb} with a single white quad covering the selected slot,
+     * using viewport-aware NDC coordinates so each slot appears square on screen.
      * Rendered at low alpha by the HUD shader to act as a highlight overlay.
      */
     private void fillHotbarBuffer(FloatBuffer fb, int selected) {
-        float slotSize = 0.07f;
-        float gap      = 0.01f;
-        float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
-        float startX   = -totalW / 2f;
-        float bottomY  = -0.92f;
+        // Slot size in screen pixels (square: SLOT_TEX_PX × GUI_SCALE)
+        float slotPx   = SLOT_TEX_PX * GUI_SCALE;
+        float borderPx = BORDER_TEX_PX * GUI_SCALE;
+        float hotbarPx = HOTBAR_SLOTS * slotPx + 2 * borderPx;
 
-        float x0 = startX + selected * (slotSize + gap);
-        float x1 = x0 + slotSize;
-        float y0 = bottomY;
-        float y1 = bottomY + slotSize;
+        // Convert pixels → NDC (origin at screen centre; 2 NDC units = viewport dimension)
+        float slotW    = (viewportW > 0) ? 2.0f * slotPx / viewportW : 0.09375f;
+        float slotH    = (viewportH > 0) ? 2.0f * slotPx / viewportH : 0.1111f;
+        float borderW  = (viewportW > 0) ? 2.0f * borderPx / viewportW : 0.003125f;
+        float borderH  = (viewportH > 0) ? 2.0f * borderPx / viewportH : 0.005556f;
+        float hotbarW  = (viewportW > 0) ? 2.0f * hotbarPx / viewportW : 0.50625f;
+        float hotbarH  = (viewportH > 0) ? 2.0f * (HOTBAR_TEX_PX_H * GUI_SCALE) / viewportH : 0.1222f;
+        float bottomY  = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        float startX = -hotbarW / 2.0f + borderW;
+        float x0 = startX + selected * slotW;
+        float x1 = x0 + slotW;
+        float y0 = bottomY + borderH;
+        float y1 = y0 + slotH;
 
         float r = 1f, g = 1f, b = 1f;  // white selection highlight
         putVertex(fb, x0, y0, r, g, b);
@@ -608,37 +660,20 @@ public class Renderer {
     }
 
     /**
-     * Builds a textured quad that covers the entire hotbar area, rendered using
-     * the {@code GUI/hotbar.png} image as the background.
+     * Builds the VAO/VBO for the hotbar background image ({@code GUI/hotbar.png}).
+     * The buffer is populated immediately using {@link #fillHotbarImageBuffer(FloatBuffer)}.
      */
     private void buildHotbarImage() {
-        float slotSize = 0.07f;
-        float gap      = 0.01f;
-        float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
-        float pad      = 0.01f;  // small border around the slot area
-
-        float x0 = -totalW / 2f - pad;
-        float x1 =  totalW / 2f + pad;
-        float y0 = -0.92f - pad;
-        float y1 = -0.92f + slotSize + pad;
-
-        float[] v = {
-            x0, y0,  0f, 1f,
-            x1, y0,  1f, 1f,
-            x1, y1,  1f, 0f,
-            x0, y0,  0f, 1f,
-            x1, y1,  1f, 0f,
-            x0, y1,  0f, 0f
-        };
-
         hotbarImageVao = glGenVertexArrays();
         hotbarImageVbo = glGenBuffers();
 
         glBindVertexArray(hotbarImageVao);
         glBindBuffer(GL_ARRAY_BUFFER, hotbarImageVbo);
-        FloatBuffer fb = BufferUtils.createFloatBuffer(v.length);
-        fb.put(v).flip();
-        glBufferData(GL_ARRAY_BUFFER, fb, GL_STATIC_DRAW);
+
+        FloatBuffer fb = BufferUtils.createFloatBuffer(6 * 4);
+        fillHotbarImageBuffer(fb);
+        fb.flip();
+        glBufferData(GL_ARRAY_BUFFER, fb, GL_DYNAMIC_DRAW);
 
         int stride = 4 * Float.BYTES;
         glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
@@ -648,6 +683,46 @@ public class Renderer {
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
+    }
+
+    /** Re-uploads the hotbar background quad each frame to keep it aspect-ratio correct. */
+    private void updateHotbarImage() {
+        FloatBuffer fb = BufferUtils.createFloatBuffer(6 * 4);
+        fillHotbarImageBuffer(fb);
+        fb.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, hotbarImageVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, fb);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    /**
+     * Computes the NDC quad for the hotbar background, maintaining the hotbar.png
+     * aspect ratio.  Uses UV from 0→{@link #HOTBAR_UV_END} to crop the 9-slot
+     * texture to show only the 8 slots used by the hotbar.
+     */
+    private void fillHotbarImageBuffer(FloatBuffer fb) {
+        float slotPx   = SLOT_TEX_PX * GUI_SCALE;
+        float borderPx = BORDER_TEX_PX * GUI_SCALE;
+        float hotbarWpx = HOTBAR_SLOTS * slotPx + 2 * borderPx; // 324px at scale 2
+        float hotbarHpx = HOTBAR_TEX_PX_H * GUI_SCALE;           // 44px at scale 2
+
+        float hotbarW  = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
+        float hotbarH  = (viewportH > 0) ? 2.0f * hotbarHpx / viewportH : 0.1222f;
+        float bottomY  = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        float x0 = -hotbarW / 2.0f;
+        float x1 =  hotbarW / 2.0f;
+        float y0 = bottomY;
+        float y1 = bottomY + hotbarH;
+
+        // v-flip: texture origin (0,0) is top-left; NDC y0 is bottom of screen
+        fb.put(x0).put(y0).put(0f).put(1f);
+        fb.put(x1).put(y0).put(HOTBAR_UV_END).put(1f);
+        fb.put(x1).put(y1).put(HOTBAR_UV_END).put(0f);
+
+        fb.put(x0).put(y0).put(0f).put(1f);
+        fb.put(x1).put(y1).put(HOTBAR_UV_END).put(0f);
+        fb.put(x0).put(y1).put(0f).put(0f);
     }
 
     // -------------------------------------------------------------------------
@@ -698,34 +773,37 @@ public class Renderer {
      * Fills {@code fb} with icon quad vertex data.
      * Each slot gets a quad slightly inset from the slot background, textured
      * with the corresponding block's icon from the icon atlas.
-     *
-     * <p>The icon NDC width is scaled by {@code viewportH / viewportW} so that
-     * the icon renders as a square in screen pixels regardless of window dimensions.
+     * Slot positions match the viewport-aware hotbar layout.
      */
     private void fillIconBuffer(FloatBuffer fb) {
         BlockType[] hotbar = player.getHotbar();
 
-        float slotSize = 0.07f;
-        float gap      = 0.01f;
-        float inset    = 0.005f; // slight inset so background border is visible
-        float totalW   = HOTBAR_SLOTS * slotSize + (HOTBAR_SLOTS - 1) * gap;
-        float startX   = -totalW / 2f;
-        float bottomY  = -0.92f;
+        float slotPx   = SLOT_TEX_PX * GUI_SCALE;
+        float borderPx = BORDER_TEX_PX * GUI_SCALE;
+        float hotbarWpx = HOTBAR_SLOTS * slotPx + 2 * borderPx;
 
-        // To make icon square in screen pixels:
-        //   pixelW = ndcW * viewportW / 2  must equal  pixelH = ndcH * viewportH / 2
-        //   → ndcW = ndcH * viewportH / viewportW
-        float iconNdcH = slotSize - 2 * inset;
-        float iconNdcW = (viewportW > 0 && viewportH > 0)
-                         ? iconNdcH * (float) viewportH / viewportW
-                         : iconNdcH;
+        float slotW   = (viewportW > 0) ? 2.0f * slotPx / viewportW : 0.0625f;
+        float slotH   = (viewportH > 0) ? 2.0f * slotPx / viewportH : 0.1111f;
+        float borderW = (viewportW > 0) ? 2.0f * borderPx / viewportW : 0.003125f;
+        float borderH = (viewportH > 0) ? 2.0f * borderPx / viewportH : 0.005556f;
+        float hotbarW = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
+        float bottomY = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        // Icon inset: 2 texture-px × GUI_SCALE on each side, leaving 32×32 px for the icon
+        float insetPx = 2.0f * GUI_SCALE;
+        float insetW  = (viewportW > 0) ? 2.0f * insetPx / viewportW : 0.0125f;
+        float insetH  = (viewportH > 0) ? 2.0f * insetPx / viewportH : 0.0222f;
+        float iconW   = slotW - 2 * insetW;
+        float iconH   = slotH - 2 * insetH;
+
+        float startX = -hotbarW / 2.0f + borderW;
 
         for (int i = 0; i < HOTBAR_SLOTS; i++) {
-            float slotCenterX = startX + i * (slotSize + gap) + slotSize / 2f;
-            float x0 = slotCenterX - iconNdcW / 2f;
-            float x1 = slotCenterX + iconNdcW / 2f;
-            float y0 = bottomY + inset;
-            float y1 = y0 + iconNdcH;
+            float slotCenterX = startX + i * slotW + slotW / 2.0f;
+            float x0 = slotCenterX - iconW / 2.0f;
+            float x1 = slotCenterX + iconW / 2.0f;
+            float y0 = bottomY + borderH + insetH;
+            float y1 = y0 + iconH;
 
             int iconIdx = TextureAtlas.getIconIndex(hotbar[i]);
             float[] uv;
@@ -749,6 +827,152 @@ public class Renderer {
 
     private static void putIconVertex(FloatBuffer fb, float x, float y, float u, float v) {
         fb.put(x).put(y).put(u).put(v);
+    }
+
+    // -------------------------------------------------------------------------
+    // Health heart bar
+    // -------------------------------------------------------------------------
+
+    /**
+     * Allocates the VAO/VBO used for heart rendering.
+     * Each frame the buffer is completely refilled in {@link #renderHearts()}.
+     *
+     * <p>Layout per heart quad: 6 vertices × 4 floats (x, y, u, v).
+     * We allocate for 2 × {@link #HEART_COUNT} quads (empty containers + filled/half).
+     */
+    private void buildHearts() {
+        heartVao = glGenVertexArrays();
+        heartVbo = glGenBuffers();
+
+        glBindVertexArray(heartVao);
+        glBindBuffer(GL_ARRAY_BUFFER, heartVbo);
+
+        // 2 passes × HEART_COUNT hearts × 6 vertices × 4 floats
+        glBufferData(GL_ARRAY_BUFFER, (long)(2 * HEART_COUNT * 6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
+
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders the health bar above the hotbar.
+     *
+     * <p>Pass 1: draw all {@link #HEART_COUNT} heart positions using {@code half.png}
+     * at a dark grey tint to represent empty containers.
+     * Pass 2: draw filled hearts (full.png) and the half heart (half.png) in full
+     * colour on top.
+     */
+    private void renderHearts() {
+        if (fullHeartTexId == 0 || halfHeartTexId == 0) return;
+
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+
+        // --- Compute heart layout ---
+        float heartPx  = HEART_TEX_PX * GUI_SCALE;                     // sprite size in pixels
+        float gapPx    = HEART_GAP_PX * GUI_SCALE;                     // gap between hearts
+        float stepPx   = heartPx + gapPx;                              // per-heart stride in pixels
+        float heartW   = (viewportW > 0) ? 2.0f * heartPx / viewportW : 0.028125f;
+        float heartH   = (viewportH > 0) ? 2.0f * heartPx / viewportH : 0.05f;
+        float stepW    = (viewportW > 0) ? 2.0f * stepPx  / viewportW : 0.031250f;
+
+        // Hotbar dimensions (must match fillHotbarBuffer / fillHotbarImageBuffer)
+        float slotPx   = SLOT_TEX_PX * GUI_SCALE;
+        float borderPx = BORDER_TEX_PX * GUI_SCALE;
+        float hotbarWpx = HOTBAR_SLOTS * slotPx + 2 * borderPx;
+        float hotbarHpx = HOTBAR_TEX_PX_H * GUI_SCALE;
+        float hotbarW  = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
+        float hotbarH  = (viewportH > 0) ? 2.0f * hotbarHpx / viewportH : 0.1222f;
+        float bottomY  = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        // Hearts sit 2px above the top of the hotbar
+        float heartGapToPx = 2.0f * GUI_SCALE;
+        float heartsBottomY = bottomY + hotbarH
+            + ((viewportH > 0) ? 2.0f * heartGapToPx / viewportH : 0.011f);
+        float heartsStartX  = -hotbarW / 2.0f;
+
+        int health    = player.getHealth();
+        int maxHealth = player.getMaxHealth();
+        int numHearts = maxHealth / 2; // each heart = 2 HP
+
+        // --- Pass 1: empty heart containers (half.png, grey tint) ---
+        FloatBuffer emptyBuf = BufferUtils.createFloatBuffer(numHearts * 6 * 4);
+        for (int i = 0; i < numHearts; i++) {
+            float x0 = heartsStartX + i * stepW;
+            float y0 = heartsBottomY;
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0 + heartW).put(y0).put(1f).put(1f);
+            emptyBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0 + heartH).put(0f).put(0f);
+        }
+        emptyBuf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, heartVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, emptyBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, halfHeartTexId);
+        iconShader.setVector4f("uColor", 0.30f, 0.30f, 0.30f, 1.0f);
+        glBindVertexArray(heartVao);
+        glDrawArrays(GL_TRIANGLES, 0, numHearts * 6);
+
+        // --- Pass 2: filled/half hearts on top ---
+        int filledHearts = health / 2;
+        boolean hasHalf  = (health % 2) == 1;
+        int activeDraw   = filledHearts + (hasHalf ? 1 : 0);
+        if (activeDraw > 0) {
+            // Build one buffer: full-heart quads followed by the optional half-heart quad
+            FloatBuffer filledBuf = BufferUtils.createFloatBuffer(activeDraw * 6 * 4);
+            for (int i = 0; i < filledHearts; i++) {
+                float x0 = heartsStartX + i * stepW;
+                float y0 = heartsBottomY;
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0).put(1f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0 + heartH).put(0f).put(0f);
+            }
+            if (hasHalf) {
+                float x0 = heartsStartX + filledHearts * stepW;
+                float y0 = heartsBottomY;
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0).put(1f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0 + heartH).put(0f).put(0f);
+            }
+            filledBuf.flip();
+            glBindBuffer(GL_ARRAY_BUFFER, heartVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, filledBuf);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            // Draw full hearts (vertices 0 … filledHearts*6)
+            if (filledHearts > 0) {
+                glBindTexture(GL_TEXTURE_2D, fullHeartTexId);
+                iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+                glBindVertexArray(heartVao);
+                glDrawArrays(GL_TRIANGLES, 0, filledHearts * 6);
+            }
+            // Draw half heart from its position in the already-uploaded buffer
+            if (hasHalf) {
+                glBindTexture(GL_TEXTURE_2D, halfHeartTexId);
+                iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+                glBindVertexArray(heartVao);
+                glDrawArrays(GL_TRIANGLES, filledHearts * 6, 6);
+            }
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     // -------------------------------------------------------------------------
@@ -1278,6 +1502,10 @@ public class Renderer {
         if (hotbarTexId != 0) glDeleteTextures(hotbarTexId);
         glDeleteVertexArrays(iconVao);
         glDeleteBuffers(iconVbo);
+        glDeleteVertexArrays(heartVao);
+        glDeleteBuffers(heartVbo);
+        if (fullHeartTexId != 0) glDeleteTextures(fullHeartTexId);
+        if (halfHeartTexId != 0) glDeleteTextures(halfHeartTexId);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
         glDeleteVertexArrays(inventoryOverlayVao);
