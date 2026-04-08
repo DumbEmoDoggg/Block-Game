@@ -38,3 +38,48 @@ jobs:
           name: BlockGame-windows-bundled
           path: target/BlockGame/
           if-no-files-found: error
+
+      # ── Publish a rolling GitHub Release so the launcher can auto-update ──
+      - name: Prepare release assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          # Zip the self-contained bundle (preserves BlockGame\ folder inside the zip)
+          Compress-Archive -Path target\BlockGame -DestinationPath target\BlockGame-windows-bundled.zip
+
+          # Write a tiny version file so the launcher can detect new builds cheaply
+          "${{ github.run_number }}" | Set-Content -NoNewline target\version.txt
+
+      - name: Publish latest-build release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES="Automatically built from commit ${{ github.sha }} (run #${{ github.run_number }}).
+
+          ### How to use the launcher
+          1. Download \`BlockGameLauncher.bat\` and \`BlockGameLauncher.ps1\` into the same folder (one-time).
+          2. Double-click \`BlockGameLauncher.bat\` — it downloads the game and keeps it up to date automatically."
+
+          # Create the release if it does not exist yet; otherwise just re-upload assets.
+          if gh release view latest-build --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload latest-build \
+              target/BlockGame-windows-bundled.zip \
+              target/BlockGame.exe \
+              target/version.txt \
+              launcher/BlockGameLauncher.ps1 \
+              launcher/BlockGameLauncher.bat \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create latest-build \
+              --title "Latest Build" \
+              --notes "$NOTES" \
+              --prerelease \
+              target/BlockGame-windows-bundled.zip \
+              target/BlockGame.exe \
+              target/version.txt \
+              launcher/BlockGameLauncher.ps1 \
+              launcher/BlockGameLauncher.bat \
+              --repo "$GITHUB_REPOSITORY"
+          fi
