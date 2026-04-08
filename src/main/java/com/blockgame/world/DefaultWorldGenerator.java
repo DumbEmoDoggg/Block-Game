@@ -10,12 +10,17 @@ package com.blockgame.world;
  *   <li>Adds a {@link BlockType#DIRT} sub-surface layer.</li>
  *   <li>Places the biome-appropriate surface block via the world's
  *       {@link BiomeProvider}.</li>
+ *   <li>Fills columns below {@link #SEA_LEVEL} with {@link BlockType#WATER}
+ *       to form lakes and oceans.</li>
  * </ol>
  *
  * <p>Cave carving and other decoration is deferred to registered
  * {@link WorldFeature} passes.
  */
 public class DefaultWorldGenerator implements WorldGenerator {
+
+    /** Y level below which open air is filled with water. */
+    public static final int SEA_LEVEL = 64;
 
     @Override
     public void generate(Chunk chunk, World world) {
@@ -43,6 +48,13 @@ public class DefaultWorldGenerator implements WorldGenerator {
                         default     -> BlockType.GRASS;
                     };
                     chunk.setBlock(lx, surfaceY - 1, lz, surface);
+                }
+
+                // Fill air columns below sea level with water
+                if (surfaceY < SEA_LEVEL) {
+                    for (int y = surfaceY; y < SEA_LEVEL; y++) {
+                        chunk.setBlock(lx, y, lz, BlockType.WATER);
+                    }
                 }
             }
         }

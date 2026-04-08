@@ -55,7 +55,10 @@ public class Renderer {
     private Shader hudShader;
     private Shader iconShader;
     private Shader highlightShader;
+    private Shader waterShader;
     private TextureAtlas textureAtlas;
+    // Animated water texture (water_still.png – 16×512, 32 frames of 16×16)
+    private int waterTextureId;
 
     private ParticleSystem particleSystem = null;
     private MobRenderer    mobRenderer    = null;
@@ -116,7 +119,9 @@ public class Renderer {
         hudShader   = new Shader("shaders/hud_vertex.glsl",  "shaders/hud_fragment.glsl");
         iconShader  = new Shader("shaders/icon_vertex.glsl", "shaders/icon_fragment.glsl");
         highlightShader = new Shader("shaders/highlight_vertex.glsl", "shaders/highlight_fragment.glsl");
+        waterShader = new Shader("shaders/water_vertex.glsl", "shaders/water_fragment.glsl");
         textureAtlas = new TextureAtlas();
+        waterTextureId = loadBlockTexture("water_still");
 
         buildCrosshair();
         buildHotbar();
@@ -157,6 +162,7 @@ public class Renderer {
 
         rebuildDirtyMeshes();
         renderWorld();
+        renderWater();
         renderParticles();
         renderMobs();
         renderHighlight();
@@ -236,6 +242,65 @@ public class Renderer {
             e.getValue().render();
         }
 
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Water pass (transparent, after solid world)
+    // -------------------------------------------------------------------------
+
+    private void renderWater() {
+        if (waterTextureId == 0) return;
+
+        waterShader.use();
+
+        Matrix4f identity   = new Matrix4f().identity();
+        Matrix4f view       = player.getCamera().getViewMatrix();
+        Matrix4f projection = player.getCamera().getProjectionMatrix();
+        waterShader.setMatrix4f("model",      identity);
+        waterShader.setMatrix4f("view",       view);
+        waterShader.setMatrix4f("projection", projection);
+        waterShader.setVector3f("lightDir",   LIGHT_DIR);
+        waterShader.setFloat("ambientStrength", 0.40f);
+        waterShader.setFloat("uTime", (float) glfwGetTime());
+        waterShader.setInt("uWaterTexture", 0);
+
+        float fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
+        float fogStart = fogEnd * 0.6f;
+        waterShader.setVector3f("uFogColor", new Vector3f(SKY_R, SKY_G, SKY_B));
+        waterShader.setFloat("uFogStart", fogStart);
+        waterShader.setFloat("uFogEnd",   fogEnd);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, waterTextureId);
+
+        // Transparent pass: blend, disable back-face culling so water is
+        // visible from below (e.g. looking up through the bottom of a lake).
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_CULL_FACE);
+
+        // Update the frustum from current matrices (already done by renderWorld,
+        // but re-set here so renderWater can be called independently if needed).
+        frustum.set(new Matrix4f(projection).mul(view));
+
+        for (Map.Entry<Long, ChunkMesh> e : chunkMeshes.entrySet()) {
+            long key = e.getKey();
+            int cx = (int) (key >> 32);
+            int cz = (int) (key & 0xFFFFFFFFL);
+
+            float minX = cx * Chunk.SIZE;
+            float minZ = cz * Chunk.SIZE;
+            float maxX = minX + Chunk.SIZE;
+            float maxZ = minZ + Chunk.SIZE;
+
+            if (!frustum.testAab(minX, 0f, minZ, maxX, Chunk.HEIGHT, maxZ)) continue;
+
+            e.getValue().renderWater();
+        }
+
+        glDisable(GL_BLEND);
+        glEnable(GL_CULL_FACE);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
@@ -719,6 +784,57 @@ public class Renderer {
         }
     }
 
+    /**
+     * Loads a PNG image from {@code /textures/<name>.png} on the classpath and
+     * uploads it to the GPU as an RGBA texture with nearest-neighbour filtering.
+     * Used for block textures that need to be bound separately (e.g. animated water).
+     *
+     * @param name filename without extension, e.g. {@code "water_still"}
+     * @return OpenGL texture ID, or {@code 0} if the resource could not be loaded
+     */
+    private static int loadBlockTexture(String name) {
+        String path = "/textures/" + name + ".png";
+        try (InputStream in = Renderer.class.getResourceAsStream(path)) {
+            if (in == null) {
+                Logger.getLogger(Renderer.class.getName())
+                      .warning("Block texture not found: " + path);
+                return 0;
+            }
+            BufferedImage img = ImageIO.read(in);
+            if (img == null) {
+                Logger.getLogger(Renderer.class.getName())
+                      .warning("Failed to decode block texture: " + path);
+                return 0;
+            }
+
+            int w = img.getWidth();
+            int h = img.getHeight();
+            int[] pixels = img.getRGB(0, 0, w, h, null, 0, w);
+            ByteBuffer buf = BufferUtils.createByteBuffer(w * h * 4);
+            for (int pixel : pixels) {
+                buf.put((byte) ((pixel >> 16) & 0xFF)); // R
+                buf.put((byte) ((pixel >>  8) & 0xFF)); // G
+                buf.put((byte) ( pixel        & 0xFF)); // B
+                buf.put((byte) ((pixel >> 24) & 0xFF)); // A
+            }
+            buf.flip();
+
+            int id = glGenTextures();
+            glBindTexture(GL_TEXTURE_2D, id);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            return id;
+        } catch (IOException e) {
+            Logger.getLogger(Renderer.class.getName())
+                  .log(Level.WARNING, "Error loading block texture: " + path, e);
+            return 0;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Generic HUD VAO helper (position-only, 2D)
     // -------------------------------------------------------------------------
@@ -747,7 +863,9 @@ public class Renderer {
         hudShader.cleanup();
         iconShader.cleanup();
         highlightShader.cleanup();
+        waterShader.cleanup();
         textureAtlas.cleanup();
+        if (waterTextureId != 0) glDeleteTextures(waterTextureId);
         if (mobRenderer != null) mobRenderer.cleanup();
 
         for (ChunkMesh m : chunkMeshes.values()) m.cleanup();

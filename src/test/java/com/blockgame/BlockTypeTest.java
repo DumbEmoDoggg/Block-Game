@@ -20,7 +20,8 @@ class BlockTypeTest {
     @Test
     void solidBlocksAreSolid() {
         for (BlockType bt : BlockType.values()) {
-            if (bt != BlockType.AIR) {
+            // AIR and WATER are intentionally non-solid; all other blocks must be solid.
+            if (bt != BlockType.AIR && bt != BlockType.WATER) {
                 assertTrue(bt.solid, bt + " should be solid");
                 // LEAVES is solid for collision but transparent for rendering (see-through gaps)
                 if (bt != BlockType.LEAVES) {
@@ -28,6 +29,13 @@ class BlockTypeTest {
                 }
             }
         }
+    }
+
+    @Test
+    void waterIsNonSolidAndTransparent() {
+        assertFalse(BlockType.WATER.solid, "WATER must not be solid (passable)");
+        assertTrue(BlockType.WATER.transparent, "WATER must be transparent for rendering");
+        assertTrue(BlockType.WATER.isTransparent(), "WATER.isTransparent() must return true");
     }
 
     @Test
