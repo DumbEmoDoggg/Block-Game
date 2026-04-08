@@ -5,8 +5,8 @@ package com.blockgame.world;
  *
  * <p>A block is hollowed out wherever two independent 3-D noise fields are
  * simultaneously near zero, producing worm-like tunnels.  Carving is skipped
- * within a few blocks of the surface and below y = 4 to preserve terrain
- * shape and leave a solid bedrock layer.
+ * below y = 4 to leave a solid bedrock layer.  When a tunnel reaches the
+ * surface the noise condition naturally opens a cave entrance.
  *
  * <p>This feature is registered by default in every {@link World} instance
  * and was previously implemented as {@code World.carveCaves()}.
@@ -33,7 +33,7 @@ public class CaveFeature implements WorldFeature {
                 int wz = chunk.getWorldZ(lz);
                 int surfaceY = world.getTerrainHeight(wx, wz);
 
-                for (int y = 4; y < surfaceY - 5; y++) {
+                for (int y = 4; y < surfaceY; y++) {
                     if (chunk.getBlock(lx, y, lz) == BlockType.AIR) continue;
 
                     double n1 = noise.octaveNoise3(
