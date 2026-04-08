@@ -262,6 +262,7 @@ public class Player implements Saveable {
             int[] hit = raycast(true);
             if (hit != null) {
                 BlockType broken = world.getBlock(hit[0], hit[1], hit[2]);
+                if (!broken.breakable) return;
                 world.setBlock(hit[0], hit[1], hit[2], BlockType.AIR);
                 if (broken.behavior != null) {
                     broken.behavior.onBreak(world, hit[0], hit[1], hit[2]);

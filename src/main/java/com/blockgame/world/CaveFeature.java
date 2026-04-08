@@ -4,14 +4,17 @@ package com.blockgame.world;
  * World feature that carves cave tunnels into the terrain.
  *
  * <p>A block is hollowed out wherever two independent 3-D noise fields are
- * simultaneously near zero, producing worm-like tunnels.  Carving is skipped
- * below y = 4 to leave a solid bedrock layer.  When a tunnel reaches the
- * surface the noise condition naturally opens a cave entrance.
+ * simultaneously near zero, producing worm-like tunnels.  Carving always
+ * starts from y=1 so the {@link BlockType#BEDROCK} layer at y=0 is
+ * preserved.  When a tunnel reaches the surface the noise condition naturally
+ * opens a cave entrance.
  *
  * <p>To keep entrances from looking unnatural, the carving threshold is
  * scaled down quadratically within the top {@value #SURFACE_TAPER_DEPTH}
  * blocks below the surface, making surface openings rare rather than
- * pervasive.
+ * pervasive.  For underwater columns (surface below sea level) the taper
+ * zone is fully suppressed so that cave tunnels never break through the
+ * ocean or lake floor.
  *
  * <p>This feature is registered by default in every {@link World} instance
  * and was previously implemented as {@code World.carveCaves()}.
@@ -45,8 +48,10 @@ public class CaveFeature implements WorldFeature {
                 int wx = chunk.getWorldX(lx);
                 int wz = chunk.getWorldZ(lz);
                 int surfaceY = world.getTerrainHeight(wx, wz);
+                boolean underwater = surfaceY < DefaultWorldGenerator.SEA_LEVEL;
 
-                for (int y = 4; y < surfaceY; y++) {
+                // Start from y=1 so bedrock at y=0 is always preserved
+                for (int y = 1; y < surfaceY; y++) {
                     if (chunk.getBlock(lx, y, lz) == BlockType.AIR) continue;
 
                     double n1 = noise.octaveNoise3(
@@ -56,11 +61,18 @@ public class CaveFeature implements WorldFeature {
                             wx * 0.04 + 100, y * 0.04 + 100, wz * 0.04 + 100,
                             2, 0.5, 2.0);
 
-                    // Near the surface, scale the threshold down quadratically so
-                    // cave entrances are rare rather than appearing everywhere.
+                    // Near the surface, taper down the threshold so cave openings
+                    // are rare.  For underwater columns suppress the taper zone
+                    // entirely so that caves never break through the ocean floor.
                     int depth = surfaceY - y;
-                    double depthRatio = Math.min(1.0, (double) depth / SURFACE_TAPER_DEPTH);
-                    double depthFactor = depthRatio * depthRatio;
+                    double depthFactor;
+                    if (underwater && depth <= SURFACE_TAPER_DEPTH) {
+                        // No cave entrances into the ocean floor
+                        depthFactor = 0.0;
+                    } else {
+                        double depthRatio = Math.min(1.0, (double) depth / SURFACE_TAPER_DEPTH);
+                        depthFactor = depthRatio * depthRatio;
+                    }
 
                     // Carve when both noise values are near zero (worm-tunnel condition)
                     if (n1 * n1 + n2 * n2 < 0.04 * depthFactor) {

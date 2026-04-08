@@ -54,6 +54,8 @@ public class World implements Saveable {
         this.generator     = new DefaultWorldGenerator();
         this.features      = new ArrayList<>();
         this.features.add(new CaveFeature(noise));
+        this.features.add(new OreFeature(noise));
+        this.features.add(new TreeFeature());
 
         // Pre-generate the initial area so the player lands on solid ground
         for (int cx = -RENDER_DISTANCE; cx <= RENDER_DISTANCE; cx++) {
