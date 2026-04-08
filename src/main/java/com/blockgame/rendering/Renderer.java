@@ -119,6 +119,8 @@ public class Renderer {
     private static final float HEART_GAP_PX = 1.0f;
 
     private int viewportW, viewportH;
+    // Tracks the viewport dimensions at which the hotbar background geometry was last built
+    private int hotbarGeomViewportW, hotbarGeomViewportH;
 
     public Renderer(long window, World world, Player player) {
         this.window = window;
@@ -464,7 +466,12 @@ public class Renderer {
 
         // --- Hotbar image background (textured quad using GUI/hotbar.png) ---
         if (hotbarTexId != 0) {
-            updateHotbarImage();
+            // Re-upload hotbar geometry only when the viewport dimensions change
+            if (viewportW != hotbarGeomViewportW || viewportH != hotbarGeomViewportH) {
+                updateHotbarImage();
+                hotbarGeomViewportW = viewportW;
+                hotbarGeomViewportH = viewportH;
+            }
             iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, hotbarTexId);
@@ -899,6 +906,7 @@ public class Renderer {
         boolean hasHalf  = (health % 2) == 1;
         int activeDraw   = filledHearts + (hasHalf ? 1 : 0);
         if (activeDraw > 0) {
+            // Build one buffer: full-heart quads followed by the optional half-heart quad
             FloatBuffer filledBuf = BufferUtils.createFloatBuffer(activeDraw * 6 * 4);
             for (int i = 0; i < filledHearts; i++) {
                 float x0 = heartsStartX + i * stepW;
@@ -925,34 +933,19 @@ public class Renderer {
             glBufferSubData(GL_ARRAY_BUFFER, 0, filledBuf);
             glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-            // Full hearts
+            // Draw full hearts (vertices 0 … filledHearts*6)
             if (filledHearts > 0) {
                 glBindTexture(GL_TEXTURE_2D, fullHeartTexId);
                 iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
                 glBindVertexArray(heartVao);
                 glDrawArrays(GL_TRIANGLES, 0, filledHearts * 6);
             }
-            // Half heart
+            // Draw half heart from its position in the already-uploaded buffer
             if (hasHalf) {
-                // Re-upload just the half-heart quad at position 0 of the buffer
-                FloatBuffer halfBuf = BufferUtils.createFloatBuffer(6 * 4);
-                float x0 = heartsStartX + filledHearts * stepW;
-                float y0 = heartsBottomY;
-                halfBuf.put(x0).put(y0).put(0f).put(1f);
-                halfBuf.put(x0 + heartW).put(y0).put(1f).put(1f);
-                halfBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
-                halfBuf.put(x0).put(y0).put(0f).put(1f);
-                halfBuf.put(x0 + heartW).put(y0 + heartH).put(1f).put(0f);
-                halfBuf.put(x0).put(y0 + heartH).put(0f).put(0f);
-                halfBuf.flip();
-                glBindBuffer(GL_ARRAY_BUFFER, heartVbo);
-                glBufferSubData(GL_ARRAY_BUFFER, 0, halfBuf);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-
                 glBindTexture(GL_TEXTURE_2D, halfHeartTexId);
                 iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
                 glBindVertexArray(heartVao);
-                glDrawArrays(GL_TRIANGLES, 0, 6);
+                glDrawArrays(GL_TRIANGLES, filledHearts * 6, 6);
             }
         }
 
