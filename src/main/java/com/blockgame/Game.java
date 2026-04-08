@@ -3,6 +3,7 @@ package com.blockgame;
 import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.player.Player;
+import com.blockgame.rendering.ParticleSystem;
 import com.blockgame.rendering.Renderer;
 import com.blockgame.world.World;
 import org.lwjgl.glfw.GLFWErrorCallback;
@@ -127,6 +128,11 @@ public class Game {
         player       = new Player(world, inputHandler, (float) WINDOW_WIDTH / WINDOW_HEIGHT);
         renderer     = new Renderer(window, world, player);
 
+        // Particle system – shared between player (spawn) and renderer (draw)
+        ParticleSystem particleSystem = new ParticleSystem();
+        player.setParticleSystem(particleSystem);
+        renderer.setParticleSystem(particleSystem);
+
         // Restore the last saved world (if one exists)
         if (Files.exists(SAVE_FILE)) {
             try {
@@ -155,6 +161,12 @@ public class Game {
         systems.add(new GameSystem() {
             @Override public void update(float dt) { world.update(player.getPosition()); }
             @Override public void cleanup()        { world.cleanup(); }
+        });
+
+        // Particle physics update – must run before the renderer draws them
+        systems.add(new GameSystem() {
+            @Override public void update(float dt) { particleSystem.update(dt); }
+            @Override public void cleanup()        { particleSystem.cleanup(); }
         });
 
         // Rendering – runs last each frame, cleanup frees GPU resources

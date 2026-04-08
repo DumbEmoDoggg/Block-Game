@@ -56,6 +56,8 @@ public class Renderer {
     private Shader highlightShader;
     private TextureAtlas textureAtlas;
 
+    private ParticleSystem particleSystem = null;
+
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
 
     // LOD thresholds (in chunk-grid units from the player chunk)
@@ -153,6 +155,7 @@ public class Renderer {
 
         rebuildDirtyMeshes();
         renderWorld();
+        renderParticles();
         renderHighlight();
         renderHud();
     }
@@ -231,6 +234,23 @@ public class Renderer {
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Particle pass
+    // -------------------------------------------------------------------------
+
+    /** Connects the particle system so it is rendered each frame. */
+    public void setParticleSystem(ParticleSystem ps) {
+        this.particleSystem = ps;
+    }
+
+    private void renderParticles() {
+        if (particleSystem == null) return;
+        particleSystem.render(
+            player.getCamera().getViewMatrix(),
+            player.getCamera().getProjectionMatrix()
+        );
     }
 
     // -------------------------------------------------------------------------
