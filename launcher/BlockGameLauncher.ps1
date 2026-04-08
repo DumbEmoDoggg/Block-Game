@@ -39,7 +39,7 @@ $REPO         = 'DumbEmoDoggg/Block-Game'
 $RELEASE_TAG  = 'latest-build'
 $BUNDLE_ASSET = 'BlockGame-windows-bundled.zip'
 $VER_ASSET    = 'version.txt'
-$LauncherDir  = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+$LauncherDir  = if ($PSScriptRoot) { $PSScriptRoot } else { $MyInvocation.MyCommand.Path | Split-Path -Parent }
 $GameDir      = Join-Path $LauncherDir 'BlockGame'
 $GameExe      = Join-Path $GameDir     'BlockGame.exe'
 $LocalVerFile = Join-Path $LauncherDir 'game-version.txt'
@@ -265,8 +265,10 @@ $timer.Add_Tick({
     # React when background work completes
     if ($sync.Done) {
         $timer.Stop()
-        try { $ps.EndInvoke($script:bgHandle) | Out-Null; $ps.Dispose() } catch {}
-        try { $rs.Close(); $rs.Dispose() } catch {}
+        $ps.EndInvoke($script:bgHandle) | Out-Null
+        $ps.Dispose()
+        $rs.Close()
+        $rs.Dispose()
 
         if ($sync.GameReady) {
             $btnPlay.Enabled   = $true
@@ -293,8 +295,9 @@ $btnPlay.Add_Click({
 
 $form.Add_FormClosing({
     $timer.Stop()
-    try { $ps.Stop() | Out-Null } catch {}
-    try { $rs.Close(); $rs.Dispose() } catch {}
+    $ps.Stop() | Out-Null
+    $rs.Close()
+    $rs.Dispose()
     if (Test-Path $TempZip) { Remove-Item $TempZip -Force -ErrorAction SilentlyContinue }
 })
 
