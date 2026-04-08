@@ -211,7 +211,9 @@ public class ChunkMesh {
 
         int wx = chunk.getWorldX(lx);
         int wz = chunk.getWorldZ(lz);
-        // Emit a face for each block level that is above the neighbour's surface
+        // Emit a face for each block level that is above the neighbour's surface.
+        // When neighborY == -1 (fully-air column), fromY becomes 0, which is correct:
+        // all block levels from the base up to surfaceY are exposed.
         int fromY = neighborY + 1;
         for (int y = fromY; y <= surfaceY; y++) {
             BlockType block = chunk.getBlock(lx, y, lz);
