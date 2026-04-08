@@ -1,5 +1,6 @@
 package com.blockgame.rendering;
 
+import com.blockgame.mob.MobManager;
 import com.blockgame.player.Player;
 import com.blockgame.world.BlockType;
 import com.blockgame.world.Chunk;
@@ -57,6 +58,7 @@ public class Renderer {
     private TextureAtlas textureAtlas;
 
     private ParticleSystem particleSystem = null;
+    private MobRenderer    mobRenderer    = null;
 
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
 
@@ -156,6 +158,7 @@ public class Renderer {
         rebuildDirtyMeshes();
         renderWorld();
         renderParticles();
+        renderMobs();
         renderHighlight();
         renderHud();
     }
@@ -248,6 +251,29 @@ public class Renderer {
     private void renderParticles() {
         if (particleSystem == null) return;
         particleSystem.render(
+            player.getCamera().getViewMatrix(),
+            player.getCamera().getProjectionMatrix()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Mob pass
+    // -------------------------------------------------------------------------
+
+    /**
+     * Connects the mob manager.  Creates a {@link MobRenderer} on first call
+     * so that it is initialised on the OpenGL thread.
+     */
+    public void setMobManager(MobManager mm) {
+        if (mobRenderer == null) {
+            mobRenderer = new MobRenderer();
+        }
+        mobRenderer.setMobManager(mm);
+    }
+
+    private void renderMobs() {
+        if (mobRenderer == null) return;
+        mobRenderer.render(
             player.getCamera().getViewMatrix(),
             player.getCamera().getProjectionMatrix()
         );
@@ -722,6 +748,7 @@ public class Renderer {
         iconShader.cleanup();
         highlightShader.cleanup();
         textureAtlas.cleanup();
+        if (mobRenderer != null) mobRenderer.cleanup();
 
         for (ChunkMesh m : chunkMeshes.values()) m.cleanup();
         chunkMeshes.clear();
