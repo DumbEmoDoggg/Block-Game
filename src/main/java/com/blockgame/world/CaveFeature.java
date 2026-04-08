@@ -8,10 +8,23 @@ package com.blockgame.world;
  * below y = 4 to leave a solid bedrock layer.  When a tunnel reaches the
  * surface the noise condition naturally opens a cave entrance.
  *
+ * <p>To keep entrances from looking unnatural, the carving threshold is
+ * scaled down quadratically within the top {@value #SURFACE_TAPER_DEPTH}
+ * blocks below the surface, making surface openings rare rather than
+ * pervasive.
+ *
  * <p>This feature is registered by default in every {@link World} instance
  * and was previously implemented as {@code World.carveCaves()}.
  */
 public class CaveFeature implements WorldFeature {
+
+    /**
+     * Number of blocks below the surface over which the carving threshold
+     * is tapered down to zero.  Caves can still open at the surface, but
+     * only in the small fraction of spots where the noise values are very
+     * close to zero even at full scale.
+     */
+    private static final int SURFACE_TAPER_DEPTH = 8;
 
     private final PerlinNoise noise;
 
@@ -43,8 +56,14 @@ public class CaveFeature implements WorldFeature {
                             wx * 0.04 + 100, y * 0.04 + 100, wz * 0.04 + 100,
                             2, 0.5, 2.0);
 
+                    // Near the surface, scale the threshold down quadratically so
+                    // cave entrances are rare rather than appearing everywhere.
+                    int depth = surfaceY - y;
+                    double depthRatio = Math.min(1.0, (double) depth / SURFACE_TAPER_DEPTH);
+                    double depthFactor = depthRatio * depthRatio;
+
                     // Carve when both noise values are near zero (worm-tunnel condition)
-                    if (n1 * n1 + n2 * n2 < 0.04) {
+                    if (n1 * n1 + n2 * n2 < 0.04 * depthFactor) {
                         chunk.setBlock(lx, y, lz, BlockType.AIR);
                     }
                 }
