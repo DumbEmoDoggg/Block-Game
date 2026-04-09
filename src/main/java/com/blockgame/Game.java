@@ -134,7 +134,7 @@ public class Game {
         player.setParticleSystem(particleSystem);
         renderer.setParticleSystem(particleSystem);
 
-        // Mob manager – spawns and updates wandering Steve mobs
+        // Mob manager – spawns and updates all Classic-era mobs
         MobManager mobManager = new MobManager(world);
         mobManager.spawnInitial(player.getPosition());
         renderer.setMobManager(mobManager);

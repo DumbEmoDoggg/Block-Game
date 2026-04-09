@@ -6,17 +6,18 @@ import org.joml.Vector3f;
 import java.util.Random;
 
 /**
- * A simple wandering mob that behaves like Steve from Minecraft's pre-classic era.
+ * A wandering mob with physics and a wander AI.
  *
  * <p>The mob walks in a random direction for a few seconds, pauses, then picks a
  * new random direction.  Gravity and basic AABB collision against the world are
  * applied so it walks on terrain naturally.
+ *
+ * <p>Physical height and the rendered model are determined by {@link MobType}.
  */
 public class Mob {
 
-    // Physical dimensions – same proportions as the player
-    public static final float HEIGHT = 2.0f;  // feet → top of head (2 block-units)
-    public static final float WIDTH  = 0.6f;
+    // Horizontal hitbox half-width – the same for all mob types
+    public static final float WIDTH = 0.6f;
 
     // Physics
     private static final float GRAVITY    = -22.0f;
@@ -35,6 +36,12 @@ public class Mob {
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
+
+    /** Identifies the kind of mob (texture, model, behaviour). */
+    public final MobType type;
+
+    /** Physical height in block-units from feet to top of head. */
+    public final float height;
 
     /** Feet position in world space. */
     public final Vector3f position;
@@ -60,7 +67,17 @@ public class Mob {
     // Construction
     // -------------------------------------------------------------------------
 
-    public Mob(float x, float y, float z, long seed) {
+    public Mob(float x, float y, float z, long seed, MobType type) {
+        this.type = type;
+        switch (type) {
+            case ZOMBIE:
+            case SKELETON: this.height = 2.0f; break;
+            case CREEPER:  this.height = 1.7f; break;
+            case SPIDER:   this.height = 0.7f; break;
+            case PIG:
+            case SHEEP:    this.height = 1.2f; break;
+            default:       this.height = 2.0f;
+        }
         this.position = new Vector3f(x, y, z);
         this.random   = new Random(seed);
         // Randomise initial wander state so mobs don't all start together
@@ -141,7 +158,7 @@ public class Mob {
             }
         } else if (dy > 0) {
             if (collidesWithWorld(world)) {
-                position.y = (float) Math.floor(position.y + HEIGHT) - HEIGHT;
+                position.y = (float) Math.floor(position.y + height) - height;
                 velocityY  = 0f;
             }
         }
@@ -162,10 +179,10 @@ public class Mob {
 
         for (float bx : xs) {
             for (float bz : zs) {
-                for (float by = position.y; by < position.y + HEIGHT; by += 0.5f) {
+                for (float by = position.y; by < position.y + height; by += 0.5f) {
                     if (isSolid(world, bx, by, bz)) return true;
                 }
-                if (isSolid(world, bx, position.y + HEIGHT - 0.001f, bz)) return true;
+                if (isSolid(world, bx, position.y + height - 0.001f, bz)) return true;
             }
         }
         return false;
