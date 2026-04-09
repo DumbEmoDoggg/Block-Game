@@ -438,7 +438,10 @@ public class Renderer {
      * alpha of 0.40, providing a visible but not overwhelming tint.
      */
     private void renderUnderwaterOverlay() {
-        // Full-screen quad in NDC, coloured with the underwater fog tint
+        // Full-screen quad in NDC, coloured with the underwater fog tint.
+        // Two triangles (6 vertices) cover the entire NDC range [−1,1]×[−1,1]:
+        //   triangle 1: bottom-left, bottom-right, top-right
+        //   triangle 2: bottom-left, top-right,   top-left
         FloatBuffer fb = BufferUtils.createFloatBuffer(6 * 5);
         float r = UW_FOG_R, g = UW_FOG_G, b = UW_FOG_B;
         float[][] corners = { {-1f,-1f}, {1f,-1f}, {1f,1f}, {-1f,-1f}, {1f,1f}, {-1f,1f} };
