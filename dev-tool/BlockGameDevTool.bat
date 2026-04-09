@@ -4,8 +4,7 @@
 :: PowerShell 5.1+ is required (included with Windows 10 / Windows Server 2016+).
 ::
 :: If BlockGameDevTool.ps1 is missing it is downloaded automatically from
-:: the latest-build release, so this .bat file can be used as a standalone
-:: bootstrap.
+:: the repository, so this .bat file can be used as a standalone bootstrap.
 
 :: Change to the directory that contains this .bat file.
 cd /d "%~dp0"
@@ -14,11 +13,11 @@ cd /d "%~dp0"
 if not exist "BlockGameDevTool.ps1" (
     echo [DevTool] BlockGameDevTool.ps1 not found. Downloading...
     powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
-        "Invoke-WebRequest -Uri 'https://github.com/DumbEmoDoggg/Block-Game/releases/download/latest-build/BlockGameDevTool.ps1' -OutFile 'BlockGameDevTool.ps1' -UseBasicParsing"
+        "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/DumbEmoDoggg/Block-Game/main/dev-tool/BlockGameDevTool.ps1' -OutFile 'BlockGameDevTool.ps1' -UseBasicParsing"
     if errorlevel 1 (
         echo [DevTool] ERROR: Failed to download BlockGameDevTool.ps1
         echo [DevTool] Please download it manually from:
-        echo [DevTool]   https://github.com/DumbEmoDoggg/Block-Game/releases/latest
+        echo [DevTool]   https://github.com/DumbEmoDoggg/Block-Game/blob/main/dev-tool/BlockGameDevTool.ps1
         pause
         exit /b 1
     )
