@@ -43,6 +43,13 @@ public class Renderer {
     // Sky colour (light blue)
     private static final float SKY_R = 0.53f, SKY_G = 0.81f, SKY_B = 0.98f;
 
+    // Underwater fog colour (deep blue-green)
+    private static final float UW_FOG_R = 0.0f, UW_FOG_G = 0.18f, UW_FOG_B = 0.38f;
+    /** Fog start distance (in blocks) when the player's eye is underwater. */
+    private static final float UW_FOG_START = 0.5f;
+    /** Fog end distance (in blocks) when the player's eye is underwater. */
+    private static final float UW_FOG_END   = 8.0f;
+
     // Sun direction (normalised at setup time)
     private static final Vector3f LIGHT_DIR =
         new Vector3f(-0.4f, -1.0f, -0.3f).normalize();
@@ -119,6 +126,9 @@ public class Renderer {
     // Gap between consecutive heart sprites, in texture pixels
     private static final float HEART_GAP_PX = 1.0f;
 
+    // Underwater overlay: a full-screen quad tinted with the underwater fog colour
+    private int underwaterVao, underwaterVbo;
+
     private int viewportW, viewportH;
     // Tracks the viewport dimensions at which the hotbar background geometry was last built
     private int hotbarGeomViewportW, hotbarGeomViewportH;
@@ -153,6 +163,7 @@ public class Renderer {
         buildHotbar();
         buildIconHotbar();
         buildHighlight();
+        buildUnderwaterOverlay();
 
         // Load GUI overlay images (crosshair, hotbar background, hearts)
         crosshairTexId  = loadGuiTexture("crosshair");
@@ -188,7 +199,12 @@ public class Renderer {
     // -------------------------------------------------------------------------
 
     public void render() {
-        glClearColor(SKY_R, SKY_G, SKY_B, 1f);
+        boolean underwater = player.isEyeUnderwater();
+        if (underwater) {
+            glClearColor(UW_FOG_R, UW_FOG_G, UW_FOG_B, 1f);
+        } else {
+            glClearColor(SKY_R, SKY_G, SKY_B, 1f);
+        }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         rebuildDirtyMeshes();
@@ -198,6 +214,7 @@ public class Renderer {
         renderParticles();
         renderMobs();
         renderHighlight();
+        if (underwater) renderUnderwaterOverlay();
         renderHud();
     }
 
@@ -243,11 +260,19 @@ public class Renderer {
         worldShader.setFloat("ambientStrength", 0.40f);
         worldShader.setInt("uTexture", 0);
 
-        // Distance fog – fade terrain to sky colour before the render-distance
-        // edge to hide the dark ring of exposed underground chunk faces.
-        float fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;  // ~352 blocks
-        float fogStart = fogEnd * 0.6f;                              // ~211 blocks
-        worldShader.setVector3f("uFogColor", new Vector3f(SKY_R, SKY_G, SKY_B));
+        // Distance fog – when underwater, use a short blue fog to simulate murky water.
+        Vector3f fogColor;
+        float fogStart, fogEnd;
+        if (player.isEyeUnderwater()) {
+            fogColor = new Vector3f(UW_FOG_R, UW_FOG_G, UW_FOG_B);
+            fogStart = UW_FOG_START;
+            fogEnd   = UW_FOG_END;
+        } else {
+            fogColor = new Vector3f(SKY_R, SKY_G, SKY_B);
+            fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;  // ~352 blocks
+            fogStart = fogEnd * 0.6f;                              // ~211 blocks
+        }
+        worldShader.setVector3f("uFogColor", fogColor);
         worldShader.setFloat("uFogStart", fogStart);
         worldShader.setFloat("uFogEnd",   fogEnd);
 
@@ -311,9 +336,18 @@ public class Renderer {
         waterShader.setFloat("uTime", (float) glfwGetTime());
         waterShader.setInt("uWaterTexture", 0);
 
-        float fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
-        float fogStart = fogEnd * 0.6f;
-        waterShader.setVector3f("uFogColor", new Vector3f(SKY_R, SKY_G, SKY_B));
+        Vector3f fogColor;
+        float fogStart, fogEnd;
+        if (player.isEyeUnderwater()) {
+            fogColor = new Vector3f(UW_FOG_R, UW_FOG_G, UW_FOG_B);
+            fogStart = UW_FOG_START;
+            fogEnd   = UW_FOG_END;
+        } else {
+            fogColor = new Vector3f(SKY_R, SKY_G, SKY_B);
+            fogEnd   = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
+            fogStart = fogEnd * 0.6f;
+        }
+        waterShader.setVector3f("uFogColor", fogColor);
         waterShader.setFloat("uFogStart", fogStart);
         waterShader.setFloat("uFogEnd",   fogEnd);
 
@@ -361,6 +395,73 @@ public class Renderer {
             player.getCamera().getViewMatrix(),
             player.getCamera().getProjectionMatrix()
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Underwater overlay pass (full-screen blue tint when eye is submerged)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Allocates a full-screen quad VAO used for the underwater colour overlay.
+     * The quad covers NDC [−1, 1] × [−1, 1] and is rendered as a translucent
+     * blue rectangle using the existing HUD shader (which outputs a fixed 0.40
+     * alpha, giving a tasteful water tint).
+     *
+     * <p>Vertex format: (x, y, r, g, b) – 5 floats per vertex, matching the
+     * layout expected by {@code hud_vertex.glsl}.
+     */
+    private void buildUnderwaterOverlay() {
+        underwaterVao = glGenVertexArrays();
+        underwaterVbo = glGenBuffers();
+
+        glBindVertexArray(underwaterVao);
+        glBindBuffer(GL_ARRAY_BUFFER, underwaterVbo);
+
+        // Allocate space for 6 vertices × 5 floats (pos2 + col3); filled in renderUnderwaterOverlay
+        glBufferData(GL_ARRAY_BUFFER, 6L * 5 * Float.BYTES, GL_DYNAMIC_DRAW);
+
+        int stride = 5 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders a semi-transparent blue overlay over the entire screen to simulate
+     * the visual effect of being submerged in water.
+     *
+     * <p>Uses the HUD shader which outputs the per-vertex colour at a fixed
+     * alpha of 0.40, providing a visible but not overwhelming tint.
+     */
+    private void renderUnderwaterOverlay() {
+        // Full-screen quad in NDC, coloured with the underwater fog tint
+        FloatBuffer fb = BufferUtils.createFloatBuffer(6 * 5);
+        float r = UW_FOG_R, g = UW_FOG_G, b = UW_FOG_B;
+        float[][] corners = { {-1f,-1f}, {1f,-1f}, {1f,1f}, {-1f,-1f}, {1f,1f}, {-1f,1f} };
+        for (float[] c : corners) {
+            fb.put(c[0]).put(c[1]).put(r).put(g).put(b);
+        }
+        fb.flip();
+
+        glBindBuffer(GL_ARRAY_BUFFER, underwaterVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, fb);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        hudShader.use();
+        glBindVertexArray(underwaterVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
     }
 
     // -------------------------------------------------------------------------
