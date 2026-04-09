@@ -101,28 +101,13 @@ public class MobRenderer {
     }
 
     // -------------------------------------------------------------------------
-    // UV arrays - Zombie (64x64, identical to the classic Steve skin layout)
+    // UV arrays - Zombie (64x64 file, but skin occupies only the top 32 rows –
+    // the same 64x32 layout used by Skeleton).  Left limbs share UV with right.
     // -------------------------------------------------------------------------
     private static final float[][] Z_HEAD_UV = computeUV( 0,  0, 8, 8,  8, 64, 64);
     private static final float[][] Z_BODY_UV = computeUV(16, 16, 8, 12, 4, 64, 64);
     private static final float[][] Z_RARM_UV = computeUV(40, 16, 4, 12, 4, 64, 64);
-    private static final float[][] Z_LARM_UV = {  // dedicated left-arm region in 64x64
-        {36f/64, 52f/64, 40f/64, 64f/64},
-        {44f/64, 52f/64, 48f/64, 64f/64},
-        {40f/64, 52f/64, 44f/64, 64f/64},
-        {32f/64, 52f/64, 36f/64, 64f/64},
-        {36f/64, 48f/64, 40f/64, 52f/64},
-        {40f/64, 48f/64, 44f/64, 52f/64},
-    };
     private static final float[][] Z_RLEG_UV = computeUV( 0, 16, 4, 12, 4, 64, 64);
-    private static final float[][] Z_LLEG_UV = {  // dedicated left-leg region in 64x64
-        {20f/64, 52f/64, 24f/64, 64f/64},
-        {28f/64, 52f/64, 32f/64, 64f/64},
-        {24f/64, 52f/64, 28f/64, 64f/64},
-        {16f/64, 52f/64, 20f/64, 64f/64},
-        {20f/64, 48f/64, 24f/64, 52f/64},
-        {24f/64, 48f/64, 28f/64, 52f/64},
-    };
 
     // -------------------------------------------------------------------------
     // UV arrays - Skeleton (64x32, left limbs share UV with right)
@@ -147,7 +132,8 @@ public class MobRenderer {
     // -------------------------------------------------------------------------
     // UV arrays - Pig (64x64)
     //
-    // Head and legs reuse the zombie (64x64) offsets.
+    // Head, snout, and legs reuse the zombie (64x64) offsets.
+    // Snout: textureOffset(16,16), size(sx=4, sy=3, sz=1).
     // Body: textureOffset(28,8), size(sx=10, sy=16, sz=8) in Minecraft model space.
     // The pig body is rendered with a 90-degree X-rotation in the original Minecraft
     // model, so the physical-to-UV face mapping is remapped here:
@@ -155,7 +141,8 @@ public class MobRenderer {
     //   Physical F_TOP   <- model SOUTH,  Physical F_BOTTOM<- model NORTH
     //   Physical F_EAST/WEST unchanged.
     // -------------------------------------------------------------------------
-    private static final float[][] PIG_HEAD_UV = computeUV(0, 0, 8, 8, 8, 64, 64);
+    private static final float[][] PIG_HEAD_UV  = computeUV(0, 0, 8, 8, 8, 64, 64);
+    private static final float[][] PIG_SNOUT_UV = computeUV(16, 16, 4, 3, 1, 64, 64);
     private static final float[][] PIG_BODY_UV = {
         {36f/64,  8f/64, 46f/64, 16f/64},  // F_NORTH  <- model TOP
         {46f/64,  8f/64, 56f/64, 16f/64},  // F_SOUTH  <- model BOTTOM
@@ -394,9 +381,9 @@ public class MobRenderer {
         float[][] headUV = skeleton ? SK_HEAD_UV : Z_HEAD_UV;
         float[][] bodyUV = skeleton ? SK_BODY_UV : Z_BODY_UV;
         float[][] rArmUV = skeleton ? SK_ARM_UV  : Z_RARM_UV;
-        float[][] lArmUV = skeleton ? SK_ARM_UV  : Z_LARM_UV;
+        float[][] lArmUV = skeleton ? SK_ARM_UV  : Z_RARM_UV;
         float[][] rLegUV = skeleton ? SK_LEG_UV  : Z_RLEG_UV;
-        float[][] lLegUV = skeleton ? SK_LEG_UV  : Z_LLEG_UV;
+        float[][] lLegUV = skeleton ? SK_LEG_UV  : Z_RLEG_UV;
 
         float yawRad  = (float) Math.toRadians(mob.yaw);
         Matrix4f base = new Matrix4f()
@@ -527,6 +514,9 @@ public class MobRenderer {
 
         // Head (forward-facing, textured with pig head UV)
         addBox(buf, base, -0.25f, 0.85f, -0.75f, 0.25f, 1.35f, -0.25f, PIG_HEAD_UV);
+
+        // Snout (protrudes 1/16 block from the head's front face)
+        addBox(buf, base, -0.125f, 1.1f, -0.8125f, 0.125f, 1.2875f, -0.75f, PIG_SNOUT_UV);
 
         // Body (horizontal slab above the legs)
         addBox(buf, base, -0.3125f, 0.70f, -0.5f, 0.3125f, 1.20f, 0.5f, PIG_BODY_UV);
