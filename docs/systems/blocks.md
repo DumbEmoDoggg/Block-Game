@@ -36,6 +36,22 @@ All blocks are defined in the `BlockType` enum. Each entry stores:
 | `COAL_ORE` | 12 | Yes | No | Yes | — |
 | `IRON_ORE` | 13 | Yes | No | Yes | — |
 | `GOLD_ORE` | 14 | Yes | No | Yes | — |
+| `COBBLESTONE` | 15 | Yes | No | Yes | — |
+| `MOSSY_COBBLESTONE` | 16 | Yes | No | Yes | — |
+| `GLASS` | 17 | Yes | **Yes** | Yes | — |
+| `BRICKS` | 18 | Yes | No | Yes | — |
+| `TNT` | 19 | Yes | No | Yes | — |
+| `BOOKSHELF` | 20 | Yes | No | Yes | — |
+| `SPONGE` | 21 | Yes | No | Yes | — |
+| `GOLD_BLOCK` | 22 | Yes | No | Yes | — |
+| `IRON_BLOCK` | 23 | Yes | No | Yes | — |
+| `SMOOTH_STONE` | 24 | Yes | No | Yes | — |
+| `STONE_SLAB` | 25 | Yes | No | Yes | — |
+| `DANDELION` | 26 | **No** | Yes | Yes | — |
+| `POPPY` | 27 | **No** | Yes | Yes | — |
+| `BROWN_MUSHROOM` | 28 | **No** | Yes | Yes | — |
+| `RED_MUSHROOM` | 29 | **No** | Yes | Yes | — |
+| `OBSIDIAN` | 30 | Yes | No | Yes | — |
 
 ---
 
@@ -66,6 +82,8 @@ The renderer skips (culls) a face between two adjacent blocks only when the neig
 This means:
 * `LEAVES` is both solid (collision) and transparent (adjacent faces are still rendered, and the texture contains see-through pixels discarded by the fragment shader's alpha test).
 * `WATER` is non-solid and transparent — you can see through it and walk through it.
+* `GLASS` is solid (collision) and transparent — similar to leaves but without see-through gaps inside the texture.
+* Plant blocks (`DANDELION`, `POPPY`, `BROWN_MUSHROOM`, `RED_MUSHROOM`) are non-solid, transparent, and cross-shaped (rendered as two perpendicular diagonal quads).
 
 ---
 

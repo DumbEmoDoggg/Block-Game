@@ -60,9 +60,9 @@ public class Player implements Saveable {
 
     // Hotbar: the 8 placeable block types
     private static final BlockType[] HOTBAR = {
-        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
-        BlockType.SNOW,  BlockType.PLANKS
+        BlockType.GRASS, BlockType.COBBLESTONE, BlockType.STONE,
+        BlockType.WOOD,  BlockType.PLANKS, BlockType.BRICKS,
+        BlockType.TNT,   BlockType.GLASS
     };
 
     // Ordered hotbar input actions matching the HOTBAR array indices

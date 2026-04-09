@@ -129,6 +129,8 @@ public class ChunkMesh {
                         if (shouldRenderFaceToward(world, chunk, block, lx, ly, lz + 1)) addFace(buf, wx, ly, wz, Face.SOUTH,  block, skyLight);
                         if (shouldRenderFaceToward(world, chunk, block, lx - 1, ly, lz)) addFace(buf, wx, ly, wz, Face.WEST,   block, skyLight);
                         if (shouldRenderFaceToward(world, chunk, block, lx + 1, ly, lz)) addFace(buf, wx, ly, wz, Face.EAST,   block, skyLight);
+                    } else if (block.isPlant()) {
+                        addCrossShape(buf, wx, ly, wz, block, skyLight);
                     } else if (block == BlockType.WATER) {
                         // Emit a water face only at water–air boundaries (never water–water)
                         if (isOpenForWaterFace(world, chunk, lx, ly + 1, lz)) addWaterFace(waterBuf, wx, ly, wz, Face.TOP,    skyLight);
@@ -490,6 +492,60 @@ public class ChunkMesh {
             case WEST:   return new float[]{ x,   y,   z+1, x,   y+1, z+1, x,   y+1, z,   x,   y,   z   };
             case EAST:   return new float[]{ x+1, y,   z,   x+1, y+1, z,   x+1, y+1, z+1, x+1, y,   z+1 };
             default:     return new float[12];
+        }
+    }
+
+    /**
+     * Emits a cross-shaped geometry for a plant block into {@code buf}.
+     *
+     * <p>Two diagonal quads are emitted, each rendered from both sides
+     * (front and back winding) so the plant is visible from all directions
+     * even with backface culling enabled.
+     *
+     * <ul>
+     *   <li>Diagonal A – NW to SE corner: (x,y,z) → (x+1,y+1,z+1)</li>
+     *   <li>Diagonal B – NE to SW corner: (x+1,y,z) → (x,y+1,z+1)</li>
+     * </ul>
+     */
+    private void addCrossShape(List<Float> buf, int x, int y, int z, BlockType block, float skyLight) {
+        int tileId = TextureAtlas.getTileId(block, false, true);
+        float[] uv = TextureAtlas.getUV(tileId);
+        float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+
+        // Use upward normal for lighting (same brightness as a top face)
+        float nx = 0f, ny = 1f, nz = 0f;
+
+        // Two diagonals; for each: V0=bottom-start, V1=top-start, V2=top-end, V3=bottom-end
+        float[][][] diagonals = {
+            // Diagonal A: (x,y,z) → (x+1,y,z+1)
+            { {x,   y,   z  }, {x,   y+1, z  }, {x+1, y+1, z+1}, {x+1, y,   z+1} },
+            // Diagonal B: (x+1,y,z) → (x,y,z+1)
+            { {x+1, y,   z  }, {x+1, y+1, z  }, {x,   y+1, z+1}, {x,   y,   z+1} }
+        };
+
+        // UV corners matching vertical side face layout: V0=(u0,v1) V1=(u0,v0) V2=(u1,v0) V3=(u1,v1)
+        float[] us = {u0, u0, u1, u1};
+        float[] vs = {v1, v0, v0, v1};
+
+        for (float[][] verts : diagonals) {
+            // Front face (CCW): 0,1,2 then 0,2,3
+            for (int i : TRIANGLE_INDICES) {
+                buf.add(verts[i][0]);
+                buf.add(verts[i][1]);
+                buf.add(verts[i][2]);
+                buf.add(us[i]); buf.add(vs[i]);
+                buf.add(nx); buf.add(ny); buf.add(nz);
+                buf.add(skyLight);
+            }
+            // Back face (reversed winding): 0,3,2 then 0,2,1
+            for (int i : new int[]{0, 3, 2, 0, 2, 1}) {
+                buf.add(verts[i][0]);
+                buf.add(verts[i][1]);
+                buf.add(verts[i][2]);
+                buf.add(us[i]); buf.add(vs[i]);
+                buf.add(nx); buf.add(ny); buf.add(nz);
+                buf.add(skyLight);
+            }
         }
     }
 
