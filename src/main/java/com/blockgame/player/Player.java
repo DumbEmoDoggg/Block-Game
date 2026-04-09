@@ -288,7 +288,7 @@ public class Player implements Saveable {
      * Used to switch between land and water physics each frame.
      */
     private boolean checkInWater() {
-        float hw = PLAYER_WIDTH / 2f - 0.001f;
+        float hw = PLAYER_WIDTH / 2f - 0.001f; // half-width minus tiny epsilon (matches collidesWithWorld)
         float[] xs = {position.x - hw, position.x + hw};
         float[] zs = {position.z - hw, position.z + hw};
 
@@ -297,7 +297,7 @@ public class Player implements Saveable {
                 for (float by = position.y; by < position.y + PLAYER_HEIGHT; by += 0.5f) {
                     if (isWater(bx, by, bz)) return true;
                 }
-                if (isWater(bx, position.y + PLAYER_HEIGHT - 0.001f, bz)) return true;
+                if (isWater(bx, position.y + PLAYER_HEIGHT - 0.001f, bz)) return true; // check head
             }
         }
         return false;
