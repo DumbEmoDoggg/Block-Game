@@ -212,11 +212,12 @@ public class ChunkMesh {
                     addWaterFace(waterBuf, wx, com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL - 1, wz, Face.TOP, 1.0f);
                 }
 
-                // Side faces: use the opaque ground height so that faces align with the
-                // actual terrain surface rather than inflating up to a leaf canopy top.
-                // This prevents visible holes at the base of hills where a tree in one
-                // column would otherwise push surfaceY far above the neighbouring ground.
-                int sideSurfaceY = (groundY >= 0) ? groundY : surfaceY;
+                // Side faces: use the full surface height (including transparent-solid
+                // blocks such as leaf canopies) so that the sides of tree canopies are
+                // visible in distant LOD chunks.  Solid blocks between the ground and the
+                // canopy top (trunk, leaves) are emitted; air gaps are skipped naturally
+                // because addLodSideFaces only emits faces for solid blocks.
+                int sideSurfaceY = surfaceY;
                 addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.NORTH);
                 addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.SOUTH);
                 addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.WEST);
