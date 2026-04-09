@@ -35,15 +35,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-$REPO         = 'DumbEmoDoggg/Block-Game'
-$RELEASE_TAG  = 'latest-build'
-$BUNDLE_ASSET = 'BlockGame-windows-bundled.zip'
-$VER_ASSET    = 'version.txt'
-$LauncherDir  = if ($PSScriptRoot) { $PSScriptRoot } else { $MyInvocation.MyCommand.Path | Split-Path -Parent }
-$GameDir      = Join-Path $LauncherDir 'BlockGame'
-$GameExe      = Join-Path $GameDir     'BlockGame.exe'
-$LocalVerFile = Join-Path $LauncherDir 'game-version.txt'
-$TempZip      = Join-Path $LauncherDir 'BlockGame-update.zip'
+$REPO                = 'DumbEmoDoggg/Block-Game'
+$RELEASE_TAG         = 'latest-build'
+$BUNDLE_ASSET        = 'BlockGame-windows-bundled.zip'
+$VER_ASSET           = 'version.txt'
+$LAUNCHER_VER_ASSET  = 'launcher-version.txt'
+$LAUNCHER_PS1_ASSET  = 'BlockGameLauncher.ps1'
+$LauncherDir         = if ($PSScriptRoot) { $PSScriptRoot } else { $MyInvocation.MyCommand.Path | Split-Path -Parent }
+$GameDir             = Join-Path $LauncherDir 'BlockGame'
+$GameExe             = Join-Path $GameDir     'BlockGame.exe'
+$LocalVerFile        = Join-Path $LauncherDir 'game-version.txt'
+$LocalLauncherVerFile = Join-Path $LauncherDir 'launcher-version.txt'
+$LauncherPs1Path     = Join-Path $LauncherDir 'BlockGameLauncher.ps1'
+$TempZip             = Join-Path $LauncherDir 'BlockGame-update.zip'
 
 # ── Thread-safe state (main UI thread <-> background runspace) ─────────────────
 $sync = [hashtable]::Synchronized(@{
@@ -53,6 +57,7 @@ $sync = [hashtable]::Synchronized(@{
     Progress  = [int]0   # 0-100; 0 keeps the Marquee style active
     Done      = $false
     GameReady = $false
+    Restart   = $false   # true when the launcher has self-updated and restarted
 })
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -154,7 +159,9 @@ function Add-LogEntry([string]$msg, [string]$level) {
 $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
 $rs.Open()
 foreach ($v in @('sync','REPO','RELEASE_TAG','BUNDLE_ASSET','VER_ASSET',
-                  'LauncherDir','GameDir','GameExe','LocalVerFile','TempZip')) {
+                  'LAUNCHER_VER_ASSET','LAUNCHER_PS1_ASSET',
+                  'LauncherDir','GameDir','GameExe','LocalVerFile',
+                  'LocalLauncherVerFile','LauncherPs1Path','TempZip')) {
     $rs.SessionStateProxy.SetVariable($v, (Get-Variable $v -ValueOnly))
 }
 
@@ -175,6 +182,50 @@ $null = $ps.AddScript({
                        -Uri     "https://api.github.com/repos/$REPO/releases/tags/$RELEASE_TAG" `
                        -Headers $hdrs -TimeoutSec 15
 
+        # ── Launcher self-update check ─────────────────────────────────────────
+        $launcherVerAsset = $release.assets | Where-Object name -eq $LAUNCHER_VER_ASSET |
+                                Select-Object -First 1
+        $remoteLauncherVer = if ($launcherVerAsset) {
+            (Invoke-RestMethod -Uri $launcherVerAsset.browser_download_url `
+                -Headers @{ 'User-Agent' = 'BlockGame-Launcher' } `
+                -TimeoutSec 10).ToString().Trim()
+        } else { $null }
+
+        $localLauncherVer = if (Test-Path $LocalLauncherVerFile) {
+            (Get-Content $LocalLauncherVerFile -Raw).Trim()
+        } else { '' }
+
+        if ($null -eq $remoteLauncherVer) {
+            Log 'WARNING: Could not determine remote launcher version — skipping launcher update.' 'warn'
+        } elseif ($remoteLauncherVer -ne $localLauncherVer) {
+            $ins = if ($localLauncherVer) { $localLauncherVer } else { 'none' }
+            Log "Launcher update available: $remoteLauncherVer  (installed: $ins)"
+
+            $launcherPs1Asset = $release.assets | Where-Object name -eq $LAUNCHER_PS1_ASSET |
+                                    Select-Object -First 1
+            if ($launcherPs1Asset) {
+                Log 'Downloading launcher update...'
+                $sync.Progress = 10
+                $tmpLauncher = Join-Path $LauncherDir 'BlockGameLauncher.ps1.tmp'
+                Invoke-WebRequest -Uri $launcherPs1Asset.browser_download_url -OutFile $tmpLauncher `
+                    -UseBasicParsing -Headers @{ 'User-Agent' = 'BlockGame-Launcher' }
+                Move-Item $tmpLauncher $LauncherPs1Path -Force
+                $sync.Progress = 20
+                Log "Launcher updated to $remoteLauncherVer — restarting..." 'ok'
+                Start-Process powershell.exe `
+                    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -STA -File `"$LauncherPs1Path`""
+                Set-Content -Path $LocalLauncherVerFile -Value $remoteLauncherVer -NoNewline
+                $sync.Restart = $true
+                $sync.Done    = $true
+                return
+            } else {
+                Log "WARNING: Launcher script asset '$LAUNCHER_PS1_ASSET' not found in release — skipping launcher update." 'warn'
+            }
+        } else {
+            Log "Launcher is up to date ($localLauncherVer)." 'ok'
+        }
+
+        # ── Game update check ──────────────────────────────────────────────────
         $verAsset  = $release.assets | Where-Object name -eq $VER_ASSET |
                          Select-Object -First 1
         $remoteVer = if ($verAsset) {
@@ -270,7 +321,10 @@ $timer.Add_Tick({
         $rs.Close()
         $rs.Dispose()
 
-        if ($sync.GameReady) {
+        if ($sync.Restart) {
+            # Launcher self-updated and restarted a new instance — close silently.
+            $form.Close()
+        } elseif ($sync.GameReady) {
             $btnPlay.Enabled   = $true
             $btnPlay.BackColor = [System.Drawing.Color]::FromArgb(55, 150, 55)
         } else {
