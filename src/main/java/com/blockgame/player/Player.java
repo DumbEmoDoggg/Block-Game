@@ -30,10 +30,22 @@ import java.io.IOException;
 public class Player implements Saveable {
 
     // Physics constants
-    private static final float MOVE_SPEED    = 5.0f;
-    private static final float SPRINT_SPEED  = 8.5f;
-    private static final float JUMP_VELOCITY = 8.5f;
-    private static final float GRAVITY       = -22.0f;
+    private static final float MOVE_SPEED        = 5.0f;
+    private static final float SPRINT_SPEED      = 8.5f;
+    private static final float JUMP_VELOCITY     = 8.5f;
+    private static final float GRAVITY           = -22.0f;
+
+    // Swimming physics constants
+    /** Horizontal movement speed while in water (70 % of land speed). */
+    private static final float SWIM_SPEED        = MOVE_SPEED  * 0.7f;
+    /** Sprint-swim speed while in water. */
+    private static final float SPRINT_SWIM_SPEED = SPRINT_SPEED * 0.7f;
+    /** Gentle downward pull while submerged (replaces full gravity). */
+    private static final float WATER_GRAVITY     = -4.0f;
+    /** Maximum downward speed while submerged (terminal velocity in water). */
+    private static final float WATER_SINK_MAX    = -2.0f;
+    /** Upward velocity applied each frame the JUMP key is held while swimming. */
+    private static final float SWIM_UP_SPEED     = 4.0f;
 
     // Player bounding-box
     private static final float EYE_HEIGHT    = 1.62f;
@@ -64,6 +76,8 @@ public class Player implements Saveable {
     private final Vector3f position    = new Vector3f(0, 72, 0);
     private float           velocityY  = 0f;
     private boolean         onGround   = false;
+    /** True when at least part of the player AABB overlaps a water block. */
+    private boolean         inWater    = false;
 
     private float yaw   = 0f;   // degrees
     private float pitch = 0f;   // degrees, positive = look up
@@ -156,8 +170,15 @@ public class Player implements Saveable {
     // -------------------------------------------------------------------------
 
     private void handleMovement(float dt) {
+        inWater = checkInWater();
+
         boolean sprinting = input.isActionDown(InputAction.SPRINT);
-        float speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
+        float speed;
+        if (inWater) {
+            speed = sprinting ? SPRINT_SWIM_SPEED : SWIM_SPEED;
+        } else {
+            speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
+        }
 
         float yr = (float) Math.toRadians(yaw);
         float sinY = (float) Math.sin(yr);
@@ -180,14 +201,22 @@ public class Player implements Saveable {
         moveX *= speed * dt;
         moveZ *= speed * dt;
 
-        // Jump
-        if (input.isActionDown(InputAction.JUMP) && onGround) {
-            velocityY = JUMP_VELOCITY;
-            onGround  = false;
+        if (inWater) {
+            // Swimming: JUMP key propels the player upward; otherwise water slows the fall.
+            if (input.isActionDown(InputAction.JUMP)) {
+                velocityY = SWIM_UP_SPEED;
+            } else {
+                velocityY += WATER_GRAVITY * dt;
+                if (velocityY < WATER_SINK_MAX) velocityY = WATER_SINK_MAX;
+            }
+        } else {
+            // Normal land physics
+            if (input.isActionDown(InputAction.JUMP) && onGround) {
+                velocityY = JUMP_VELOCITY;
+                onGround  = false;
+            }
+            velocityY += GRAVITY * dt;
         }
-
-        // Gravity
-        velocityY += GRAVITY * dt;
 
         // Apply movement with collision
         moveWithCollision(moveX, velocityY * dt, moveZ);
@@ -252,6 +281,46 @@ public class Player implements Saveable {
             (int) Math.floor(y),
             (int) Math.floor(z)
         ).solid;
+    }
+
+    /**
+     * Returns {@code true} if the player AABB overlaps at least one water block.
+     * Used to switch between land and water physics each frame.
+     */
+    private boolean checkInWater() {
+        float hw = PLAYER_WIDTH / 2f - 0.001f;
+        float[] xs = {position.x - hw, position.x + hw};
+        float[] zs = {position.z - hw, position.z + hw};
+
+        for (float bx : xs) {
+            for (float bz : zs) {
+                for (float by = position.y; by < position.y + PLAYER_HEIGHT; by += 0.5f) {
+                    if (isWater(bx, by, bz)) return true;
+                }
+                if (isWater(bx, position.y + PLAYER_HEIGHT - 0.001f, bz)) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isWater(float x, float y, float z) {
+        return world.getBlock(
+            (int) Math.floor(x),
+            (int) Math.floor(y),
+            (int) Math.floor(z)
+        ) == BlockType.WATER;
+    }
+
+    /**
+     * Returns {@code true} when the player's eye level is inside a water block.
+     * Used by the renderer to apply the underwater visual effect (blue fog tint).
+     */
+    public boolean isEyeUnderwater() {
+        return world.getBlock(
+            (int) Math.floor(position.x),
+            (int) Math.floor(position.y + EYE_HEIGHT),
+            (int) Math.floor(position.z)
+        ) == BlockType.WATER;
     }
 
     // -------------------------------------------------------------------------
@@ -468,6 +537,8 @@ public class Player implements Saveable {
     public int       getHotbarIndex()        { return hotbarIndex; }
     public int[]     getTargetedBlock()      { return hasTargetedBlock ? targetedBlock : null; }
     public int[]     getTargetedFaceNormal() { return hasTargetedBlock ? targetedFaceNormal : null; }
+    /** Returns {@code true} when the player is at least partially submerged in water. */
+    public boolean   isInWater()             { return inWater; }
 
     // -------------------------------------------------------------------------
     // Health system
