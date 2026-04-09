@@ -858,22 +858,22 @@ $btnCommit.Add_Click({
 # ── Startup: self-update check (background) ───────────────────────────────────
 $form.Add_Shown({
     # Run update check in a background job so the UI stays responsive
-    $sync = [hashtable]::Synchronized(@{ Restart = $false; Done = $false; Msg = '' })
+    $script:sync = [hashtable]::Synchronized(@{ Restart = $false; Done = $false; Msg = '' })
     $captToken  = $script:Token
-    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
-    $rs.Open()
-    $rs.SessionStateProxy.SetVariable('sync',           $sync)
-    $rs.SessionStateProxy.SetVariable('REPO',           $REPO)
-    $rs.SessionStateProxy.SetVariable('RELEASE_TAG',    $RELEASE_TAG)
-    $rs.SessionStateProxy.SetVariable('DEVTOOL_VER_ASSET', $DEVTOOL_VER_ASSET)
-    $rs.SessionStateProxy.SetVariable('DEVTOOL_PS1_ASSET', $DEVTOOL_PS1_ASSET)
-    $rs.SessionStateProxy.SetVariable('LocalVerFile',   $LocalVerFile)
-    $rs.SessionStateProxy.SetVariable('SelfPs1Path',    $SelfPs1Path)
-    $rs.SessionStateProxy.SetVariable('captToken',      $captToken)
+    $script:rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+    $script:rs.Open()
+    $script:rs.SessionStateProxy.SetVariable('sync',           $script:sync)
+    $script:rs.SessionStateProxy.SetVariable('REPO',           $REPO)
+    $script:rs.SessionStateProxy.SetVariable('RELEASE_TAG',    $RELEASE_TAG)
+    $script:rs.SessionStateProxy.SetVariable('DEVTOOL_VER_ASSET', $DEVTOOL_VER_ASSET)
+    $script:rs.SessionStateProxy.SetVariable('DEVTOOL_PS1_ASSET', $DEVTOOL_PS1_ASSET)
+    $script:rs.SessionStateProxy.SetVariable('LocalVerFile',   $LocalVerFile)
+    $script:rs.SessionStateProxy.SetVariable('SelfPs1Path',    $SelfPs1Path)
+    $script:rs.SessionStateProxy.SetVariable('captToken',      $captToken)
 
-    $ps = [System.Management.Automation.PowerShell]::Create()
-    $ps.Runspace = $rs
-    $null = $ps.AddScript({
+    $script:ps = [System.Management.Automation.PowerShell]::Create()
+    $script:ps.Runspace = $script:rs
+    $null = $script:ps.AddScript({
         function Get-AuthHdrs([string]$t) {
             $h = @{ 'User-Agent' = 'BlockGame-DevTool'; 'Accept' = 'application/vnd.github+json' }
             if ($t) { $h['Authorization'] = "Bearer $t" }
@@ -911,20 +911,20 @@ $form.Add_Shown({
         $sync.Done = $true
     })
 
-    $handle = $ps.BeginInvoke()
+    $script:bgHandle = $script:ps.BeginInvoke()
 
-    $updateTimer          = New-Object System.Windows.Forms.Timer
-    $updateTimer.Interval = 200
-    $updateTimer.Add_Tick({
-        if (-not $sync.Done) { return }
-        $updateTimer.Stop()
-        $ps.EndInvoke($handle) | Out-Null
-        $ps.Dispose()
-        $rs.Close()
-        $rs.Dispose()
-        if ($sync.Restart) { $form.Close() }
+    $script:updateTimer          = New-Object System.Windows.Forms.Timer
+    $script:updateTimer.Interval = 200
+    $script:updateTimer.Add_Tick({
+        if (-not $script:sync.Done) { return }
+        $script:updateTimer.Stop()
+        $script:ps.EndInvoke($script:bgHandle) | Out-Null
+        $script:ps.Dispose()
+        $script:rs.Close()
+        $script:rs.Dispose()
+        if ($script:sync.Restart) { $form.Close() }
     })
-    $updateTimer.Start()
+    $script:updateTimer.Start()
 })
 
 # ── Run ────────────────────────────────────────────────────────────────────────
