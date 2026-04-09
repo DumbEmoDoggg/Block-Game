@@ -206,16 +206,13 @@ public class TextureAtlas {
             BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
 
             // --- Isometric layout (pixel art style) ---
-            // The icon is 32×32. We draw:
-            //   Top face:   a rhombus at y=0 → y=10, full width 32
-            //   Left face:  left half, y=8  → y=30
-            //   Right face: right half, y=8 → y=30
-            //
-            // Top face: shear horizontally to form a diamond/rhombus
-            //   Source: 16×16 tile → Dest: 32×12 rhombus (each row offset by 1)
-            drawIsometricTop(iconAtlas, topTile, ox);
+            // The icon is 32×32. We draw side faces first, then top face on top.
+            //   Left face:  left half  (x=0..15),  y=8..31
+            //   Right face: right half (x=16..31), y=8..31
+            //   Top face:   full-width diamond,     y=0..15 (drawn last, in front)
             drawIsometricLeft(iconAtlas, sideTile, ox);
             drawIsometricRight(iconAtlas, rightTile, ox);
+            drawIsometricTop(iconAtlas, topTile, ox);
         }
 
         g2.dispose();
@@ -242,28 +239,28 @@ public class TextureAtlas {
     /**
      * Draws the top face of an isometric block icon into {@code dest} at x-offset {@code ox}.
      *
-     * <p>The top face is projected as a diamond (parallelogram) spanning the full
-     * 32-pixel icon width and about 10 pixels tall at the top of the icon.
-     * Pixel (srcX, srcY) of the 16×16 tile maps to a 2×1 pixel rhombus in the icon.
+     * <p>The top face is projected as a diamond spanning the full 32-pixel icon width
+     * and 16 pixels tall (rows 0–15). Each source pixel (sx, sy) of the 16×16 tile maps
+     * to a 2×1 pixel cell: px = ox + (sx−sy) + 15, px+1; py = (sx+sy)/2.
+     *
+     * <ul>
+     *   <li>Top vertex    (sx=0,  sy=0):  px=15..16, py=0</li>
+     *   <li>Right vertex  (sx=15, sy=0):  px=30..31, py=7</li>
+     *   <li>Left vertex   (sx=0,  sy=15): px=0..1,   py=7</li>
+     *   <li>Bottom vertex (sx=15, sy=15): px=15..16, py=15</li>
+     * </ul>
      */
     private static void drawIsometricTop(BufferedImage dest, BufferedImage tile, int ox) {
-        // Each source pixel → 2 destination pixels wide, 1 pixel tall
-        // Top-left corner of the rhombus: (0, 8) in the icon
-        // Row srcY shifts the start-x by -srcY and +srcX
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Isometric mapping: each step right = +2, -1; each step down = -2, -1 (for top view)
-                int dx = sx * 2 - sy * 2;
-                int dy = sx + sy;
-                // Center in 32-wide icon: add half-width offset
-                int px = ox + dx; // range: -(2*15)=−30 to +(2*15)=+30 from center... need re-centering
-                // Re-center: dx ranges [-30, 30], we want [0, 31]
-                px = ox + dx + ICON_SIZE / 2 - 1;
-                int py = dy / 2; // range [0, 15]
+                // Each step right (sx++) → +1 dest-x, each step down (sy++) → −1 dest-x;
+                // both steps add ½ dest-y.  Two dest pixels wide per source pixel.
+                int dx = sx - sy;
+                int px = ox + dx + ICON_SIZE / 2 - 1; // range [ox+0, ox+30]
+                int py = (sx + sy) / 2;               // range [0, 15]
                 if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
-                    // Fill the second pixel to the right to avoid gaps
                     if (px + 1 < ox + ICON_SIZE) {
                         dest.setRGB(px + 1, py, argb);
                     }
@@ -273,21 +270,27 @@ public class TextureAtlas {
     }
 
     /**
-     * Draws the left (front) side face of the isometric icon.
-     * The left face is below the top-left edge of the rhombus.
+     * Draws the left (front-left) side face of the isometric icon.
+     *
+     * <p>The face occupies the left half of the icon (x = ox..ox+15) and starts
+     * immediately below the top diamond's bottom-left edge.  Source column sx maps
+     * to destination column ox+sx; source row sy maps downward with an isometric skew:
+     *
+     * <pre>py = (sx + TILE_SIZE − 1) / 2 + 1 + sy</pre>
+     *
+     * This ensures:
+     * <ul>
+     *   <li>At sx=0  (left edge):  top of face is py=8  — one below the left vertex (py=7)</li>
+     *   <li>At sx=15 (center-left): top of face is py=16 — one below the bottom vertex (py=15)</li>
+     * </ul>
      */
     private static void drawIsometricLeft(BufferedImage dest, BufferedImage tile, int ox) {
-        // Left face: left half of the icon, y=8..30
-        // Source x maps to icon column 0..15, source y maps down with a slight skew
-        int topY = 8; // where the top face ends on the left
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Darken the left face slightly (ambient occlusion effect)
                 argb = darkenColor(argb, 0.70f);
-                // Left face: x maps left half (px 0..15), y maps down with isometric skew
                 int px = ox + sx;
-                int py = topY + sy + (TILE_SIZE - 1 - sx) / 2;
+                int py = (sx + TILE_SIZE - 1) / 2 + 1 + sy;
                 if (px >= ox && px < ox + ICON_SIZE / 2 && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
                 }
@@ -296,19 +299,31 @@ public class TextureAtlas {
     }
 
     /**
-     * Draws the right side face of the isometric icon.
-     * The right face is below the top-right edge of the rhombus.
+     * Draws the right (front-right) side face of the isometric icon.
+     *
+     * <p>The face occupies the right half of the icon (x = ox+16..ox+31) and starts
+     * immediately below the top diamond's bottom-right edge.  Source column sx=0 maps
+     * to the rightmost destination column (ox+31) and sx=15 maps to ox+16 (right→left),
+     * matching the perspective of the right side of the cube:
+     *
+     * <pre>
+     * px = ox + ICON_SIZE − 1 − sx
+     * py = (TILE_SIZE − 1 + sx) / 2 + 1 + sy
+     * </pre>
+     *
+     * This ensures:
+     * <ul>
+     *   <li>At sx=0  (right edge):   top of face is py=8  — one below the right vertex (py=7)</li>
+     *   <li>At sx=15 (center-right): top of face is py=16 — one below the bottom vertex (py=15)</li>
+     * </ul>
      */
     private static void drawIsometricRight(BufferedImage dest, BufferedImage tile, int ox) {
-        int topY = 8;
         for (int sy = 0; sy < TILE_SIZE; sy++) {
             for (int sx = 0; sx < TILE_SIZE; sx++) {
                 int argb = tile.getRGB(sx, sy);
-                // Darken the right face slightly more (shadow side)
                 argb = darkenColor(argb, 0.85f);
-                // Right face: x maps right half (px 16..31), skewed oppositely
-                int px = ox + ICON_SIZE / 2 + sx;
-                int py = topY + sy + sx / 2;
+                int px = ox + ICON_SIZE - 1 - sx;
+                int py = (TILE_SIZE - 1 + sx) / 2 + 1 + sy;
                 if (px >= ox + ICON_SIZE / 2 && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
                 }
