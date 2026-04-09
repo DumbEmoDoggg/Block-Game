@@ -49,23 +49,45 @@ public class TextureAtlas {
     // -------------------------------------------------------------------------
 
     public static final int TILE_SIZE  = 16;
-    public static final int ATLAS_COLS = 4;
-    public static final int ATLAS_ROWS = 3;
-    public static final int ATLAS_W    = TILE_SIZE * ATLAS_COLS; // 64
-    public static final int ATLAS_H    = TILE_SIZE * ATLAS_ROWS; // 48
+    public static final int ATLAS_COLS = 6;
+    public static final int ATLAS_ROWS = 6;
+    public static final int ATLAS_W    = TILE_SIZE * ATLAS_COLS; // 96
+    public static final int ATLAS_H    = TILE_SIZE * ATLAS_ROWS; // 96
 
     // Tile IDs (row-major: tile N is at column N%ATLAS_COLS, row N/ATLAS_COLS)
-    public static final int TILE_GRASS_TOP  = 0;
-    public static final int TILE_GRASS_SIDE = 1;
-    public static final int TILE_DIRT       = 2;
-    public static final int TILE_STONE      = 3;
-    public static final int TILE_WOOD_TOP   = 4;
-    public static final int TILE_WOOD_SIDE  = 5;
-    public static final int TILE_LEAVES     = 6;
-    public static final int TILE_SAND       = 7;
-    public static final int TILE_SNOW       = 8;
-    public static final int TILE_PLANKS     = 9;
-    public static final int TILE_GRAVEL     = 10;
+    public static final int TILE_GRASS_TOP        =  0;
+    public static final int TILE_GRASS_SIDE       =  1;
+    public static final int TILE_DIRT             =  2;
+    public static final int TILE_STONE            =  3;
+    public static final int TILE_WOOD_TOP         =  4;
+    public static final int TILE_WOOD_SIDE        =  5;
+    public static final int TILE_LEAVES           =  6;
+    public static final int TILE_SAND             =  7;
+    public static final int TILE_SNOW             =  8;
+    public static final int TILE_PLANKS           =  9;
+    public static final int TILE_GRAVEL           = 10;
+    public static final int TILE_COBBLESTONE      = 11;
+    public static final int TILE_MOSSY_COBBLE     = 12;
+    public static final int TILE_GLASS            = 13;
+    public static final int TILE_BRICKS           = 14;
+    public static final int TILE_TNT_TOP          = 15;
+    public static final int TILE_TNT_SIDE         = 16;
+    public static final int TILE_TNT_BOTTOM       = 17;
+    public static final int TILE_BOOKSHELF        = 18;
+    public static final int TILE_SPONGE           = 19;
+    public static final int TILE_GOLD_BLOCK       = 20;
+    public static final int TILE_IRON_BLOCK       = 21;
+    public static final int TILE_SMOOTH_STONE     = 22;
+    public static final int TILE_STONE_SLAB_SIDE  = 23;
+    public static final int TILE_DANDELION        = 24;
+    public static final int TILE_POPPY            = 25;
+    public static final int TILE_BROWN_MUSHROOM   = 26;
+    public static final int TILE_RED_MUSHROOM     = 27;
+    public static final int TILE_OBSIDIAN         = 28;
+    public static final int TILE_COAL_ORE         = 29;
+    public static final int TILE_IRON_ORE         = 30;
+    public static final int TILE_GOLD_ORE         = 31;
+    public static final int TILE_BEDROCK          = 32;
 
     private final int textureId;
     private final int iconTextureId;
@@ -73,9 +95,16 @@ public class TextureAtlas {
     // Icon atlas layout: one 32×32 icon per non-AIR solid block type
     // All solid block types in order (matches ICON_BLOCKS array)
     public static final BlockType[] ICON_BLOCKS = {
-        BlockType.GRASS, BlockType.DIRT, BlockType.STONE,
-        BlockType.WOOD,  BlockType.LEAVES, BlockType.SAND,
-        BlockType.SNOW,  BlockType.PLANKS
+        BlockType.GRASS,        BlockType.DIRT,         BlockType.STONE,
+        BlockType.WOOD,         BlockType.LEAVES,       BlockType.SAND,
+        BlockType.SNOW,         BlockType.PLANKS,       BlockType.COBBLESTONE,
+        BlockType.MOSSY_COBBLESTONE, BlockType.GLASS,   BlockType.BRICKS,
+        BlockType.TNT,          BlockType.BOOKSHELF,    BlockType.SPONGE,
+        BlockType.GOLD_BLOCK,   BlockType.IRON_BLOCK,   BlockType.SMOOTH_STONE,
+        BlockType.STONE_SLAB,   BlockType.OBSIDIAN,     BlockType.GRAVEL,
+        BlockType.COAL_ORE,     BlockType.IRON_ORE,     BlockType.GOLD_ORE,
+        BlockType.DANDELION,    BlockType.POPPY,        BlockType.BROWN_MUSHROOM,
+        BlockType.RED_MUSHROOM
     };
     public static final int ICON_SIZE   = 32; // pixels per icon
     public static final int ICON_COUNT  = ICON_BLOCKS.length;
@@ -163,17 +192,41 @@ public class TextureAtlas {
                 if (isTop)  return TILE_GRASS_TOP;
                 if (isSide) return TILE_GRASS_SIDE;
                 return TILE_DIRT; // bottom
-            case DIRT:   return TILE_DIRT;
-            case STONE:  return TILE_STONE;
+            case DIRT:             return TILE_DIRT;
+            case STONE:            return TILE_STONE;
             case WOOD:
                 return isTop || !isSide ? TILE_WOOD_TOP : TILE_WOOD_SIDE;
-            case LEAVES: return TILE_LEAVES;
-            case SAND:   return TILE_SAND;
-            case SNOW:   return TILE_SNOW;
-            case PLANKS: return TILE_PLANKS;
-            case GRAVEL: return TILE_GRAVEL;
-            // Ores and bedrock share the stone tile for now
-            default:     return TILE_STONE;
+            case LEAVES:           return TILE_LEAVES;
+            case SAND:             return TILE_SAND;
+            case SNOW:             return TILE_SNOW;
+            case PLANKS:           return TILE_PLANKS;
+            case GRAVEL:           return TILE_GRAVEL;
+            case COBBLESTONE:      return TILE_COBBLESTONE;
+            case MOSSY_COBBLESTONE: return TILE_MOSSY_COBBLE;
+            case GLASS:            return TILE_GLASS;
+            case BRICKS:           return TILE_BRICKS;
+            case TNT:
+                if (isTop)  return TILE_TNT_TOP;
+                if (isSide) return TILE_TNT_SIDE;
+                return TILE_TNT_BOTTOM;
+            case BOOKSHELF:
+                return (isTop || !isSide) ? TILE_PLANKS : TILE_BOOKSHELF;
+            case SPONGE:           return TILE_SPONGE;
+            case GOLD_BLOCK:       return TILE_GOLD_BLOCK;
+            case IRON_BLOCK:       return TILE_IRON_BLOCK;
+            case SMOOTH_STONE:     return TILE_SMOOTH_STONE;
+            case STONE_SLAB:
+                return isSide ? TILE_STONE_SLAB_SIDE : TILE_SMOOTH_STONE;
+            case DANDELION:        return TILE_DANDELION;
+            case POPPY:            return TILE_POPPY;
+            case BROWN_MUSHROOM:   return TILE_BROWN_MUSHROOM;
+            case RED_MUSHROOM:     return TILE_RED_MUSHROOM;
+            case OBSIDIAN:         return TILE_OBSIDIAN;
+            case COAL_ORE:         return TILE_COAL_ORE;
+            case IRON_ORE:         return TILE_IRON_ORE;
+            case GOLD_ORE:         return TILE_GOLD_ORE;
+            case BEDROCK:          return TILE_BEDROCK;
+            default:               return TILE_STONE;
         }
     }
 
@@ -342,17 +395,39 @@ public class TextureAtlas {
 
     private BufferedImage buildAtlas() {        BufferedImage img = new BufferedImage(ATLAS_W, ATLAS_H, BufferedImage.TYPE_INT_ARGB);
 
-        drawTile(img, TILE_GRASS_TOP,  loadTile(textureName("grass_top"),  () -> grassTop()));
-        drawTile(img, TILE_GRASS_SIDE, loadTile(textureName("grass_side"), () -> grassSide()));
-        drawTile(img, TILE_DIRT,       loadTile(textureName("dirt"),       () -> dirt()));
-        drawTile(img, TILE_STONE,      loadTile(textureName("stone"),      () -> stone()));
-        drawTile(img, TILE_WOOD_TOP,   loadTile(textureName("wood_top"),   () -> woodTop()));
-        drawTile(img, TILE_WOOD_SIDE,  loadTile(textureName("wood_side"),  () -> woodSide()));
-        drawTile(img, TILE_LEAVES,     loadTile(textureName("leaves"),     () -> leaves()));
-        drawTile(img, TILE_SAND,       loadTile(textureName("sand"),       () -> sand()));
-        drawTile(img, TILE_SNOW,       loadTile(textureName("snow"),       () -> snow()));
-        drawTile(img, TILE_PLANKS,     loadTile(textureName("planks"),     () -> planks()));
-        drawTile(img, TILE_GRAVEL,     loadTile(textureName("gravel"),     () -> gravel()));
+        drawTile(img, TILE_GRASS_TOP,       loadTile(textureName("grass_top"),       () -> grassTop()));
+        drawTile(img, TILE_GRASS_SIDE,      loadTile(textureName("grass_side"),      () -> grassSide()));
+        drawTile(img, TILE_DIRT,            loadTile(textureName("dirt"),            () -> dirt()));
+        drawTile(img, TILE_STONE,           loadTile(textureName("stone"),           () -> stone()));
+        drawTile(img, TILE_WOOD_TOP,        loadTile(textureName("wood_top"),        () -> woodTop()));
+        drawTile(img, TILE_WOOD_SIDE,       loadTile(textureName("wood_side"),       () -> woodSide()));
+        drawTile(img, TILE_LEAVES,          loadTile(textureName("leaves"),          () -> leaves()));
+        drawTile(img, TILE_SAND,            loadTile(textureName("sand"),            () -> sand()));
+        drawTile(img, TILE_SNOW,            loadTile(textureName("snow"),            () -> snow()));
+        drawTile(img, TILE_PLANKS,          loadTile(textureName("planks"),          () -> planks()));
+        drawTile(img, TILE_GRAVEL,          loadTile(textureName("gravel"),          () -> gravel()));
+        drawTile(img, TILE_COBBLESTONE,     loadTile(textureName("cobblestone"),     () -> stone()));
+        drawTile(img, TILE_MOSSY_COBBLE,    loadTile(textureName("mossy_cobblestone"), () -> stone()));
+        drawTile(img, TILE_GLASS,           loadTile(textureName("glass"),           () -> glass()));
+        drawTile(img, TILE_BRICKS,          loadTile(textureName("bricks"),          () -> stone()));
+        drawTile(img, TILE_TNT_TOP,         loadTile(textureName("tnt_top"),         () -> stone()));
+        drawTile(img, TILE_TNT_SIDE,        loadTile(textureName("tnt_side"),        () -> stone()));
+        drawTile(img, TILE_TNT_BOTTOM,      loadTile(textureName("tnt_bottom"),      () -> stone()));
+        drawTile(img, TILE_BOOKSHELF,       loadTile(textureName("bookshelf"),       () -> planks()));
+        drawTile(img, TILE_SPONGE,          loadTile(textureName("sponge"),          () -> solid(220, 215, 90)));
+        drawTile(img, TILE_GOLD_BLOCK,      loadTile(textureName("gold_block"),      () -> solid(240, 200, 50)));
+        drawTile(img, TILE_IRON_BLOCK,      loadTile(textureName("iron_block"),      () -> solid(215, 215, 215)));
+        drawTile(img, TILE_SMOOTH_STONE,    loadTile(textureName("smooth_stone"),    () -> stone()));
+        drawTile(img, TILE_STONE_SLAB_SIDE, loadTile(textureName("stone_slab_side"), () -> stone()));
+        drawTile(img, TILE_DANDELION,       loadTile(textureName("dandelion"),       () -> solid(255, 240, 26)));
+        drawTile(img, TILE_POPPY,           loadTile(textureName("poppy"),           () -> solid(240, 30, 30)));
+        drawTile(img, TILE_BROWN_MUSHROOM,  loadTile(textureName("brown_mushroom"),  () -> solid(155, 100, 50)));
+        drawTile(img, TILE_RED_MUSHROOM,    loadTile(textureName("red_mushroom"),    () -> solid(230, 40, 40)));
+        drawTile(img, TILE_OBSIDIAN,        loadTile(textureName("obsidian"),        () -> solid(30, 18, 46)));
+        drawTile(img, TILE_COAL_ORE,        loadTile(textureName("coal_ore"),        () -> stone()));
+        drawTile(img, TILE_IRON_ORE,        loadTile(textureName("iron_ore"),        () -> stone()));
+        drawTile(img, TILE_GOLD_ORE,        loadTile(textureName("gold_ore"),        () -> stone()));
+        drawTile(img, TILE_BEDROCK,         loadTile(textureName("bedrock"),         () -> solid(46, 46, 46)));
 
         return img;
     }
@@ -665,6 +740,20 @@ public class TextureAtlas {
             int x = rng.nextInt(TILE_SIZE);
             int y = rng.nextInt(TILE_SIZE);
             setRgb(img, x, y, 165, 160, 155);
+        }
+        return img;
+    }
+
+    private static BufferedImage glass() {
+        // Semi-transparent glass: mostly transparent with a thin opaque border
+        BufferedImage img = new BufferedImage(TILE_SIZE, TILE_SIZE, BufferedImage.TYPE_INT_ARGB);
+        int borderColor = 0xFF_C6_DE_F7; // light blue-white border
+        int transparent = 0x00_00_00_00;
+        for (int py = 0; py < TILE_SIZE; py++) {
+            for (int px = 0; px < TILE_SIZE; px++) {
+                boolean isBorder = px == 0 || py == 0 || px == TILE_SIZE - 1 || py == TILE_SIZE - 1;
+                img.setRGB(px, py, isBorder ? borderColor : transparent);
+            }
         }
         return img;
     }

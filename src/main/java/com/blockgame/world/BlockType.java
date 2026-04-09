@@ -39,7 +39,39 @@ public enum BlockType {
     /** Stone with rusty iron inclusions. */
     IRON_ORE (13, 0.62f, 0.52f, 0.40f, true,  false),
     /** Stone with shimmering gold inclusions. */
-    GOLD_ORE (14, 0.65f, 0.60f, 0.28f, true,  false);
+    GOLD_ORE (14, 0.65f, 0.60f, 0.28f, true,  false),
+    /** Rough stone with a cracked surface; classic building material. */
+    COBBLESTONE       (15, 0.55f, 0.55f, 0.55f, true,  false),
+    /** Cobblestone overgrown with moss. */
+    MOSSY_COBBLESTONE (16, 0.45f, 0.55f, 0.40f, true,  false),
+    /** Transparent glass pane – solid for collision, see-through for rendering. */
+    GLASS             (17, 0.95f, 0.95f, 1.00f, true,  true),
+    /** Classic fired-clay bricks. */
+    BRICKS            (18, 0.70f, 0.35f, 0.28f, true,  false),
+    /** Explosive block with distinct top, side and bottom faces. */
+    TNT               (19, 0.75f, 0.15f, 0.15f, true,  false),
+    /** Wood planks on top/bottom, filled shelves on sides. */
+    BOOKSHELF         (20, 0.70f, 0.52f, 0.30f, true,  false),
+    /** Porous yellow block that absorbs water. */
+    SPONGE            (21, 0.90f, 0.88f, 0.35f, true,  false),
+    /** Solid block of gold. */
+    GOLD_BLOCK        (22, 0.95f, 0.80f, 0.20f, true,  false),
+    /** Solid block of iron. */
+    IRON_BLOCK        (23, 0.85f, 0.85f, 0.85f, true,  false),
+    /** Polished stone with a smooth finish; slab texture on sides. */
+    SMOOTH_STONE      (24, 0.65f, 0.65f, 0.65f, true,  false),
+    /** Single stone slab – full-height block with slab texture on sides. */
+    STONE_SLAB        (25, 0.65f, 0.65f, 0.65f, true,  false),
+    /** Yellow flower; cross-shaped, non-solid decoration. */
+    DANDELION         (26, 1.00f, 0.95f, 0.10f, false, true,  null, true, true),
+    /** Red flower; cross-shaped, non-solid decoration. */
+    POPPY             (27, 0.95f, 0.12f, 0.12f, false, true,  null, true, true),
+    /** Small brown mushroom; cross-shaped, non-solid decoration. */
+    BROWN_MUSHROOM    (28, 0.60f, 0.40f, 0.20f, false, true,  null, true, true),
+    /** Small red mushroom; cross-shaped, non-solid decoration. */
+    RED_MUSHROOM      (29, 0.90f, 0.15f, 0.15f, false, true,  null, true, true),
+    /** Extremely dense volcanic glass; very dark purple. */
+    OBSIDIAN          (30, 0.12f, 0.07f, 0.18f, true,  false);
 
     /** Compact id stored in chunk byte arrays. Max 255 types. */
     public final int id;
@@ -72,17 +104,29 @@ public enum BlockType {
      */
     public final BlockBehavior behavior;
 
+    /**
+     * Whether this block is a cross-shaped plant (e.g. flowers, mushrooms).
+     * Plant blocks are non-solid and transparent; they are rendered as two
+     * perpendicular diagonal quads rather than a solid cube.
+     */
+    public final boolean plant;
+
     BlockType(int id, float r, float g, float b, boolean solid, boolean transparent) {
-        this(id, r, g, b, solid, transparent, null, true);
+        this(id, r, g, b, solid, transparent, null, true, false);
     }
 
     BlockType(int id, float r, float g, float b, boolean solid, boolean transparent,
               BlockBehavior behavior) {
-        this(id, r, g, b, solid, transparent, behavior, true);
+        this(id, r, g, b, solid, transparent, behavior, true, false);
     }
 
     BlockType(int id, float r, float g, float b, boolean solid, boolean transparent,
               BlockBehavior behavior, boolean breakable) {
+        this(id, r, g, b, solid, transparent, behavior, breakable, false);
+    }
+
+    BlockType(int id, float r, float g, float b, boolean solid, boolean transparent,
+              BlockBehavior behavior, boolean breakable, boolean plant) {
         this.id          = id;
         this.r           = r;
         this.g           = g;
@@ -91,11 +135,17 @@ public enum BlockType {
         this.transparent = transparent;
         this.behavior    = behavior;
         this.breakable   = breakable;
+        this.plant       = plant;
     }
 
     /** @return {@code true} if light and geometry can pass through this block. */
     public boolean isTransparent() {
         return !solid || transparent;
+    }
+
+    /** @return {@code true} if this block is a cross-shaped plant decoration. */
+    public boolean isPlant() {
+        return plant;
     }
 
     /**

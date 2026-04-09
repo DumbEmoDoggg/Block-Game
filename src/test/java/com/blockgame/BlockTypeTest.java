@@ -20,13 +20,14 @@ class BlockTypeTest {
     @Test
     void solidBlocksAreSolid() {
         for (BlockType bt : BlockType.values()) {
-            // AIR and WATER are intentionally non-solid; all other blocks must be solid.
-            if (bt != BlockType.AIR && bt != BlockType.WATER) {
-                assertTrue(bt.solid, bt + " should be solid");
-                // LEAVES is solid for collision but transparent for rendering (see-through gaps)
-                if (bt != BlockType.LEAVES) {
-                    assertFalse(bt.isTransparent(), bt + " should not be transparent");
-                }
+            // AIR, WATER, and plant blocks are intentionally non-solid.
+            if (bt == BlockType.AIR || bt == BlockType.WATER || bt.isPlant()) {
+                continue;
+            }
+            assertTrue(bt.solid, bt + " should be solid");
+            // LEAVES and GLASS are solid for collision but transparent for rendering.
+            if (bt != BlockType.LEAVES && bt != BlockType.GLASS) {
+                assertFalse(bt.isTransparent(), bt + " should not be transparent");
             }
         }
     }
@@ -43,6 +44,26 @@ class BlockTypeTest {
         assertTrue(BlockType.LEAVES.solid,       "LEAVES must remain solid for collision");
         assertTrue(BlockType.LEAVES.transparent, "LEAVES must be transparent for rendering");
         assertTrue(BlockType.LEAVES.isTransparent(), "LEAVES.isTransparent() must return true");
+    }
+
+    @Test
+    void glassIsSolidAndTransparent() {
+        assertTrue(BlockType.GLASS.solid,       "GLASS must be solid for collision");
+        assertTrue(BlockType.GLASS.transparent, "GLASS must be transparent for rendering");
+        assertTrue(BlockType.GLASS.isTransparent(), "GLASS.isTransparent() must return true");
+    }
+
+    @Test
+    void plantBlocksAreNonSolidAndTransparent() {
+        BlockType[] plants = {
+            BlockType.DANDELION, BlockType.POPPY,
+            BlockType.BROWN_MUSHROOM, BlockType.RED_MUSHROOM
+        };
+        for (BlockType bt : plants) {
+            assertFalse(bt.solid, bt + " must not be solid");
+            assertTrue(bt.transparent, bt + " must be transparent");
+            assertTrue(bt.isPlant(), bt + " must have isPlant() == true");
+        }
     }
 
     @Test
