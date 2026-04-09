@@ -174,9 +174,14 @@ public class MobRenderer {
     // Head: textureOffset(0,0),  size(sx=6, sy=6,  sz=8).
     // Legs: textureOffset(0,16), size(sx=4, sy=12, sz=4).
     // Sheep wool (sheep_wool.png) uses the same UV regions with expanded boxes.
+    //
+    // Note: each entry is {u0, v0, u1, v1}. Because the texture is 64x32
+    // (non-square), u-coordinates are divided by 64 and v-coordinates by 32.
+    // The mixed denominators (/64 and /32) in the same row are intentional.
     // -------------------------------------------------------------------------
     private static final float[][] SH_HEAD_UV = computeUV(0, 0, 6, 6, 8, 64, 32);
     private static final float[][] SH_BODY_UV = {
+        // {u0/64, v0/32, u1/64, v1/32}
         {34f/64,  8f/32, 42f/64, 14f/32},  // F_NORTH  <- model TOP
         {42f/64,  8f/32, 50f/64, 14f/32},  // F_SOUTH  <- model BOTTOM
         {28f/64, 14f/32, 34f/64, 30f/32},  // F_EAST   <- model EAST
@@ -193,7 +198,9 @@ public class MobRenderer {
     // 10 parts x 6 faces x 6 verts = 360 verts per mob.
     // -------------------------------------------------------------------------
     private static final int FLOATS_PER_VERTEX  = 9;   // pos(3)+uv(2)+normal(3)+skyLight(1)
-    private static final int MAX_VERTS_PER_MOB  = 360; // spider (10 parts x 6 faces x 6 verts)
+    // Spider body pass: 2 body parts + 8 legs = 10 parts x 6 faces x 6 verts = 360.
+    // This is the maximum vertex count for any single draw call (any type, any pass).
+    private static final int MAX_VERTS_PER_MOB  = 360;
     private static final int MAX_TOTAL_MOBS     = 32;  // upper bound for VBO pre-allocation
 
     // -------------------------------------------------------------------------
