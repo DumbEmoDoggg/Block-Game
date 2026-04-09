@@ -168,10 +168,15 @@ public class ChunkMesh {
     private void buildSurface(Chunk chunk, World world) {
         // Pre-compute the surface height (index of the topmost solid block, or
         // -1 for a fully-air column) for every column in this chunk.
+        // surfaceHeights includes transparent-solid blocks such as LEAVES.
+        // groundHeights tracks only the topmost solid, non-transparent block
+        // (the actual terrain surface, ignoring tree canopies).
         int[][] surfaceHeights = new int[Chunk.SIZE][Chunk.SIZE];
+        int[][] groundHeights  = new int[Chunk.SIZE][Chunk.SIZE];
         for (int lx = 0; lx < Chunk.SIZE; lx++) {
             for (int lz = 0; lz < Chunk.SIZE; lz++) {
                 surfaceHeights[lx][lz] = findSurfaceHeight(chunk, lx, lz);
+                groundHeights[lx][lz]  = findOpaqueGroundHeight(chunk, lx, lz);
             }
         }
 
@@ -183,12 +188,23 @@ public class ChunkMesh {
                 int surfaceY = surfaceHeights[lx][lz];
                 if (surfaceY < 0) continue;
 
+                int groundY = groundHeights[lx][lz];
+
                 int wx = chunk.getWorldX(lx);
                 int wz = chunk.getWorldZ(lz);
 
                 if (surfaceY >= com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL) {
-                    // Above-water column: emit the surface block's top face.
+                    // Above-water column: emit the canopy/surface block's top face.
                     addFace(buf, wx, surfaceY, wz, Face.TOP, chunk.getBlock(lx, surfaceY, lz), 1.0f);
+
+                    // When the canopy inflates surfaceY above the actual terrain (e.g. a
+                    // tree's leaf top is higher than the grass beneath it), also emit the
+                    // top face of the opaque ground block so the real terrain surface is
+                    // visible and not hidden under a floating canopy.
+                    if (groundY >= 0 && groundY < surfaceY
+                            && groundY >= com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL) {
+                        addFace(buf, wx, groundY, wz, Face.TOP, chunk.getBlock(lx, groundY, lz), 1.0f);
+                    }
                 } else {
                     // Underwater column: emit only the water surface at sea level.
                     // Skipping the seabed top face avoids the stepped seabed pattern
@@ -196,12 +212,15 @@ public class ChunkMesh {
                     addWaterFace(waterBuf, wx, com.blockgame.world.DefaultWorldGenerator.SEA_LEVEL - 1, wz, Face.TOP, 1.0f);
                 }
 
-                // Side faces: emit wherever the adjacent column is lower so that
-                // the vertical terrain wall is not invisible.
-                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.NORTH);
-                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.SOUTH);
-                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.WEST);
-                addLodSideFaces(buf, chunk, world, lx, lz, surfaceY, surfaceHeights, Face.EAST);
+                // Side faces: use the opaque ground height so that faces align with the
+                // actual terrain surface rather than inflating up to a leaf canopy top.
+                // This prevents visible holes at the base of hills where a tree in one
+                // column would otherwise push surfaceY far above the neighbouring ground.
+                int sideSurfaceY = (groundY >= 0) ? groundY : surfaceY;
+                addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.NORTH);
+                addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.SOUTH);
+                addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.WEST);
+                addLodSideFaces(buf, chunk, world, lx, lz, sideSurfaceY, groundHeights, Face.EAST);
             }
         }
 
@@ -226,6 +245,20 @@ public class ChunkMesh {
     }
 
     /**
+     * Returns the Y index of the topmost solid, <em>non-transparent</em> block
+     * in the given local column (the actual terrain surface), or {@code -1} if
+     * no such block exists.  Transparent-solid blocks such as {@link BlockType#LEAVES}
+     * are skipped so that tree canopies do not inflate the ground height.
+     */
+    private int findOpaqueGroundHeight(Chunk chunk, int lx, int lz) {
+        for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
+            BlockType b = chunk.getBlock(lx, ly, lz);
+            if (b.solid && !b.transparent) return ly;
+        }
+        return -1;
+    }
+
+    /**
      * Returns the surface height of the neighbouring column that lies one step
      * in the direction encoded by {@code (dlx, dlz)} from the local position
      * {@code (lx, lz)}.  Uses the pre-computed {@code surfaceHeights} table for
@@ -237,11 +270,13 @@ public class ChunkMesh {
         if (nlx >= 0 && nlx < Chunk.SIZE && nlz >= 0 && nlz < Chunk.SIZE) {
             return surfaceHeights[nlx][nlz];
         }
-        // Cross-chunk: scan downward through the world
+        // Cross-chunk: scan downward through the world for opaque ground
+        // (matching the ground-height semantics used by the caller).
         int wx = chunk.getWorldX(nlx);
         int wz = chunk.getWorldZ(nlz);
         for (int ly = Chunk.HEIGHT - 1; ly >= 0; ly--) {
-            if (world.getBlock(wx, ly, wz).solid) return ly;
+            BlockType b = world.getBlock(wx, ly, wz);
+            if (b.solid && !b.transparent) return ly;
         }
         return -1;
     }
