@@ -1013,7 +1013,7 @@ public class Renderer {
      * @return OpenGL texture ID, or {@code 0} if the resource could not be loaded
      */
     private static int loadBlockTexture(String name) {
-        String path = "/textures/" + name + ".png";
+        String path = "/textures/Blocks/" + name + ".png";
         try (InputStream in = Renderer.class.getResourceAsStream(path)) {
             if (in == null) {
                 Logger.getLogger(Renderer.class.getName())

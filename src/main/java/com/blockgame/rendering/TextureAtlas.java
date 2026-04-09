@@ -26,9 +26,9 @@ import static org.lwjgl.opengl.GL30.glGenerateMipmap;
 /**
  * Builds and uploads a block texture atlas to the GPU.
  *
- * <p>Each tile is loaded from {@code textures/<name>.png} on the classpath.
+ * <p>Each tile is loaded from {@code textures/Blocks/<name>.png} on the classpath.
  * The mapping from tile key to PNG filename is read from
- * {@code textures/block_textures.json} at startup, so textures can be
+ * {@code textures/Blocks/block_textures.json} at startup, so textures can be
  * remapped simply by editing that file.  If a PNG is missing or cannot be
  * decoded, the tile falls back to a procedurally generated image.
  *
@@ -386,7 +386,7 @@ public class TextureAtlas {
      */
     private static Map<String, String> loadTextureMap() {
         Map<String, String> map = new HashMap<>();
-        String path = "/textures/block_textures.json";
+        String path = "/textures/Blocks/block_textures.json";
         try (InputStream in = TextureAtlas.class.getResourceAsStream(path)) {
             if (in == null) {
                 LOGGER.warning("block_textures.json not found on classpath; using procedural fallbacks.");
@@ -413,11 +413,11 @@ public class TextureAtlas {
     }
 
     /**
-     * Loads a 16×16 tile image from {@code textures/<name>.png} on the classpath.
+     * Loads a 16×16 tile image from {@code textures/Blocks/<name>.png} on the classpath.
      * Falls back to the supplied procedural generator if the resource is missing or unreadable.
      */
     private static BufferedImage loadTile(String name, java.util.function.Supplier<BufferedImage> fallback) {
-        String path = "/textures/" + name + ".png";
+        String path = "/textures/Blocks/" + name + ".png";
         try (InputStream in = TextureAtlas.class.getResourceAsStream(path)) {
             if (in != null) {
                 BufferedImage src = ImageIO.read(in);
