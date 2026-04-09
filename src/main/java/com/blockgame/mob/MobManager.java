@@ -14,12 +14,12 @@ import java.util.Random;
  *
  * <p>Implements {@link GameSystem} so it can be registered in the main game
  * loop and updated every frame.  Mobs are spawned once at startup in a ring
- * around the player's initial spawn position.
+ * around the player's initial spawn position, covering all Classic mob types.
  */
 public class MobManager implements GameSystem {
 
-    /** Number of Steve mobs spawned in the world. */
-    private static final int MOB_COUNT = 5;
+    /** Number of mobs spawned in the world (one of each Classic mob type, doubled). */
+    private static final int MOB_COUNT = 12;
 
     /** Distance range (blocks) in which mobs are spawned from the centre. */
     private static final float SPAWN_RADIUS_MIN = 10f;
@@ -45,19 +45,20 @@ public class MobManager implements GameSystem {
      *               initial position)
      */
     public void spawnInitial(Vector3f centre) {
+        MobType[] types = MobType.values();
         for (int i = 0; i < MOB_COUNT; i++) {
-            spawnMobNear(centre);
+            spawnMobNear(centre, types[i % types.length]);
         }
     }
 
-    private void spawnMobNear(Vector3f centre) {
+    private void spawnMobNear(Vector3f centre, MobType type) {
         float angle = random.nextFloat() * (float) (Math.PI * 2.0);
         float dist  = SPAWN_RADIUS_MIN + random.nextFloat() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
         int   wx    = (int) (centre.x + Math.cos(angle) * dist);
         int   wz    = (int) (centre.z + Math.sin(angle) * dist);
         int   wy    = world.getTerrainHeight(wx, wz) + 1;
 
-        mobs.add(new Mob(wx + 0.5f, wy, wz + 0.5f, random.nextLong()));
+        mobs.add(new Mob(wx + 0.5f, wy, wz + 0.5f, random.nextLong(), type));
     }
 
     // -------------------------------------------------------------------------
