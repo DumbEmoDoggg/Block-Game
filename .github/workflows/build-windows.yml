@@ -52,6 +52,9 @@ jobs:
           # Write a tiny version file so the launcher can detect new builds cheaply
           "${{ github.run_number }}" | Set-Content -NoNewline target\version.txt
 
+          # Write a launcher version file so the launcher can detect launcher updates
+          "${{ github.run_number }}" | Set-Content -NoNewline launcher\launcher-version.txt
+
       - name: Publish latest-build release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
@@ -76,6 +79,7 @@ jobs:
               target/version.txt \
               launcher/BlockGameLauncher.ps1 \
               launcher/BlockGameLauncher.bat \
+              launcher/launcher-version.txt \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
             gh release create latest-build \
@@ -87,5 +91,6 @@ jobs:
               target/version.txt \
               launcher/BlockGameLauncher.ps1 \
               launcher/BlockGameLauncher.bat \
+              launcher/launcher-version.txt \
               --repo "$GITHUB_REPOSITORY"
           fi
