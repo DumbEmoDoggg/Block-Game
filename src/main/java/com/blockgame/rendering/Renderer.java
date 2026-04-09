@@ -62,6 +62,7 @@ public class Renderer {
 
     private ParticleSystem particleSystem = null;
     private MobRenderer    mobRenderer    = null;
+    private CloudRenderer  cloudRenderer  = null;
 
     private final Map<Long, ChunkMesh> chunkMeshes = new HashMap<>();
 
@@ -146,6 +147,7 @@ public class Renderer {
         waterShader = new Shader("shaders/water_vertex.glsl", "shaders/water_fragment.glsl");
         textureAtlas = new TextureAtlas();
         waterTextureId = loadBlockTexture("water_still");
+        cloudRenderer = new CloudRenderer();
 
         buildCrosshair();
         buildHotbar();
@@ -191,6 +193,7 @@ public class Renderer {
 
         rebuildDirtyMeshes();
         renderWorld();
+        renderClouds();
         renderWater();
         renderParticles();
         renderMobs();
@@ -272,6 +275,20 @@ public class Renderer {
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Cloud pass (after solid world, before transparent water)
+    // -------------------------------------------------------------------------
+
+    private void renderClouds() {
+        cloudRenderer.render(
+            player.getCamera().getViewMatrix(),
+            player.getCamera().getProjectionMatrix(),
+            player.getPosition(),
+            (float) glfwGetTime(),
+            SKY_R, SKY_G, SKY_B
+        );
     }
 
     // -------------------------------------------------------------------------
