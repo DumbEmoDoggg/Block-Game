@@ -68,16 +68,8 @@ public class Mob {
     // -------------------------------------------------------------------------
 
     public Mob(float x, float y, float z, long seed, MobType type) {
-        this.type = type;
-        switch (type) {
-            case ZOMBIE:
-            case SKELETON: this.height = 2.0f; break;
-            case CREEPER:  this.height = 1.7f; break;
-            case SPIDER:   this.height = 0.7f; break;
-            case PIG:
-            case SHEEP:    this.height = 1.2f; break;
-            default:       this.height = 2.0f;
-        }
+        this.type   = type;
+        this.height = type.height;
         this.position = new Vector3f(x, y, z);
         this.random   = new Random(seed);
         // Randomise initial wander state so mobs don't all start together
