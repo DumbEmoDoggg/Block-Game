@@ -27,7 +27,17 @@ public class CaveFeature implements WorldFeature {
      * only in the small fraction of spots where the noise values are very
      * close to zero even at full scale.
      */
-    private static final int SURFACE_TAPER_DEPTH = 8;
+    private static final int SURFACE_TAPER_DEPTH = 12;
+
+    /** Noise sampling scale.  Higher values produce thinner tunnels. */
+    private static final double NOISE_SCALE = 0.05;
+
+    /**
+     * Squared-distance threshold in noise space.  A block is carved when
+     * {@code n1² + n2² < CARVE_THRESHOLD}.  Reducing this value lowers
+     * both the frequency and the cross-sectional size of cave tunnels.
+     */
+    private static final double CARVE_THRESHOLD = 0.02;
 
     private final PerlinNoise noise;
 
@@ -55,10 +65,10 @@ public class CaveFeature implements WorldFeature {
                     if (chunk.getBlock(lx, y, lz) == BlockType.AIR) continue;
 
                     double n1 = noise.octaveNoise3(
-                            wx * 0.04, y * 0.04, wz * 0.04,
+                            wx * NOISE_SCALE, y * NOISE_SCALE, wz * NOISE_SCALE,
                             2, 0.5, 2.0);
                     double n2 = noise.octaveNoise3(
-                            wx * 0.04 + 100, y * 0.04 + 100, wz * 0.04 + 100,
+                            wx * NOISE_SCALE + 100, y * NOISE_SCALE + 100, wz * NOISE_SCALE + 100,
                             2, 0.5, 2.0);
 
                     // Near the surface, taper down the threshold so cave openings
@@ -75,7 +85,7 @@ public class CaveFeature implements WorldFeature {
                     }
 
                     // Carve when both noise values are near zero (worm-tunnel condition)
-                    if (n1 * n1 + n2 * n2 < 0.04 * depthFactor) {
+                    if (n1 * n1 + n2 * n2 < CARVE_THRESHOLD * depthFactor) {
                         chunk.setBlock(lx, y, lz, BlockType.AIR);
                     }
                 }
