@@ -10,14 +10,17 @@ package com.blockgame.world;
  * upward from the surface.  Tree structure:
  * <ul>
  *   <li>Trunk – 5 {@link BlockType#WOOD} blocks from the surface up</li>
- *   <li>Lower canopy – 5×5 ring of {@link BlockType#LEAVES} at trunk levels
- *       3 and 4 (corners omitted)</li>
- *   <li>Upper canopy – 3×3 {@link BlockType#LEAVES} at trunk levels 5 and 6</li>
+ *   <li>Lower canopy – 5×5 ring of {@link BlockType#LEAVES} at the top two
+ *       trunk levels (corners omitted)</li>
+ *   <li>Upper canopy – 3×3 {@link BlockType#LEAVES} at one and two blocks
+ *       above the trunk top</li>
  * </ul>
  *
- * <p>Leaf blocks that would fall outside the current chunk (0–15 in X and Z)
- * are silently skipped; the adjacent chunk will place those leaves when it is
- * generated.
+ * <p>To avoid leaves being cut off at chunk borders each chunk scans a
+ * {@code CANOPY_RADIUS}-wide border around itself.  Tree origins found in
+ * that border belong to neighbouring chunks; their trunks are skipped (the
+ * neighbour places them) but any of their leaf blocks that land inside this
+ * chunk are placed normally.
  */
 public class TreeFeature implements WorldFeature {
 
@@ -27,10 +30,15 @@ public class TreeFeature implements WorldFeature {
     /** Trunk height in blocks. */
     private static final int TRUNK_HEIGHT = 5;
 
+    /** Maximum horizontal reach of the lower canopy (2 blocks from the trunk centre). */
+    private static final int CANOPY_RADIUS = 2;
+
     @Override
     public void apply(Chunk chunk, World world) {
-        for (int lx = 0; lx < Chunk.SIZE; lx++) {
-            for (int lz = 0; lz < Chunk.SIZE; lz++) {
+        // Expand the scan by CANOPY_RADIUS in every direction so that trees
+        // rooted in neighbouring chunks can still contribute leaves to this chunk.
+        for (int lx = -CANOPY_RADIUS; lx < Chunk.SIZE + CANOPY_RADIUS; lx++) {
+            for (int lz = -CANOPY_RADIUS; lz < Chunk.SIZE + CANOPY_RADIUS; lz++) {
                 int wx = chunk.getWorldX(lx);
                 int wz = chunk.getWorldZ(lz);
 
@@ -49,17 +57,25 @@ public class TreeFeature implements WorldFeature {
                 double r = ((h >> 16) & 0x7FFFL) / (double) 0x8000L;
                 if (r >= TREE_PROBABILITY) continue;
 
-                // Surface block must be GRASS (not sand/snow/desert surface)
                 int grassY = surfaceY - 1;
-                if (chunk.getBlock(lx, grassY, lz) != BlockType.GRASS) continue;
+
+                boolean inChunk = lx >= 0 && lx < Chunk.SIZE && lz >= 0 && lz < Chunk.SIZE;
+
+                // For columns inside this chunk also verify the surface block
+                // (guards against sand/snow surfaces introduced by biome transitions).
+                // For border columns the block lives in a neighbouring chunk that may
+                // not be loaded yet; the biome check above is sufficient there.
+                if (inChunk && chunk.getBlock(lx, grassY, lz) != BlockType.GRASS) continue;
 
                 // Ensure enough vertical space for the full tree
                 int treeTop = grassY + TRUNK_HEIGHT + 2;
                 if (treeTop >= Chunk.HEIGHT) continue;
 
-                // --- Trunk ---
-                for (int i = 1; i <= TRUNK_HEIGHT; i++) {
-                    chunk.setBlock(lx, grassY + i, lz, BlockType.WOOD);
+                // --- Trunk (only for origins inside this chunk) ---
+                if (inChunk) {
+                    for (int i = 1; i <= TRUNK_HEIGHT; i++) {
+                        chunk.setBlock(lx, grassY + i, lz, BlockType.WOOD);
+                    }
                 }
 
                 int trunkTopY = grassY + TRUNK_HEIGHT;
