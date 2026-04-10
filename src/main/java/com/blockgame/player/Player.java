@@ -1,6 +1,7 @@
 package com.blockgame.player;
 
 import com.blockgame.Saveable;
+import com.blockgame.audio.SoundEngine;
 import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.rendering.ParticleSystem;
@@ -151,6 +152,16 @@ public class Player implements Saveable {
     // Optional particle system – set after construction via setParticleSystem()
     private ParticleSystem particleSystem = null;
 
+    // Optional sound engine – set after construction via setSoundEngine()
+    private SoundEngine soundEngine = null;
+
+    // Accumulated horizontal distance since the last footstep sound (blocks)
+    private float stepSoundAccumulator = 0f;
+    // Whether the player was in water last frame (used to detect splash entry)
+    private boolean wasInWater = false;
+    // Countdown until the next in-water swim sound (seconds)
+    private float swimSoundTimer = 0f;
+
     // Dependencies
     private final World        world;
     private final InputHandler input;
@@ -192,6 +203,15 @@ public class Player implements Saveable {
         camera.setPitch(pitch);
         camera.setYaw(yaw);
         camera.updateView();
+
+        // Update OpenAL listener to follow the player's ears
+        if (soundEngine != null) {
+            Vector3f dir = camera.getDirection();
+            soundEngine.setListenerPosition(
+                position.x, position.y + EYE_HEIGHT, position.z,
+                dir.x, dir.y, dir.z
+            );
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -294,6 +314,43 @@ public class Player implements Saveable {
             wasFalling = false;
         } else {
             wasFalling = fallingBeforeMove;
+        }
+
+        // ---- Sound events ----
+        if (soundEngine != null) {
+            boolean hasHorizontalMovement = (moveX != 0f || moveZ != 0f);
+
+            // Water entry / exit splash
+            if (inWater && !wasInWater) {
+                soundEngine.playSplash(position.x, position.y, position.z);
+            }
+            wasInWater = inWater;
+
+            // Swimming stroke sound (periodic, while moving in water)
+            if (inWater && hasHorizontalMovement) {
+                swimSoundTimer -= dt;
+                if (swimSoundTimer <= 0f) {
+                    soundEngine.playSwim(position.x, position.y, position.z);
+                    swimSoundTimer = SoundEngine.SWIM_INTERVAL;
+                }
+            } else if (!inWater) {
+                swimSoundTimer = 0f;
+            }
+
+            // Footstep sounds (on-ground, horizontal movement only)
+            if (onGround && !inWater && hasHorizontalMovement) {
+                stepSoundAccumulator += (float) Math.sqrt(moveX * moveX + moveZ * moveZ);
+                if (stepSoundAccumulator >= SoundEngine.STEP_DISTANCE) {
+                    stepSoundAccumulator -= SoundEngine.STEP_DISTANCE;
+                    // Determine the block directly beneath the player's feet
+                    BlockType underFoot = world.getBlock(
+                        (int) Math.floor(position.x),
+                        (int) Math.floor(position.y) - 1,
+                        (int) Math.floor(position.z)
+                    );
+                    soundEngine.playBlockStep(underFoot, position.x, position.y, position.z);
+                }
+            }
         }
     }
 
@@ -414,6 +471,7 @@ public class Player implements Saveable {
                 if (drownDamageTimer >= DROWN_DAMAGE_INTERVAL) {
                     drownDamageTimer -= DROWN_DAMAGE_INTERVAL;
                     damage(1);
+                    if (soundEngine != null) soundEngine.playPlayerDrownDamage();
                 }
             }
         } else {
@@ -498,6 +556,9 @@ public class Player implements Saveable {
                 }
                 if (particleSystem != null) {
                     particleSystem.spawn(hit[0], hit[1], hit[2], broken);
+                }
+                if (soundEngine != null) {
+                    soundEngine.playBlockBreak(broken, hit[0], hit[1], hit[2]);
                 }
                 lastBlockActionMs = now;
             } else {
@@ -796,6 +857,11 @@ public class Player implements Saveable {
     /** Connects the particle system so block-break events spawn particles. */
     public void setParticleSystem(ParticleSystem ps) {
         this.particleSystem = ps;
+    }
+
+    /** Connects the sound engine so audio events (steps, breaks, swims) are played. */
+    public void setSoundEngine(SoundEngine se) {
+        this.soundEngine = se;
     }
 }
 

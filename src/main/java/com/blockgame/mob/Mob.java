@@ -78,6 +78,15 @@ public class Mob {
     /** Cooldown timer between mob attacks (seconds). */
     private float attackTimer = 0f;
 
+    /** Seconds until the next ambient "say" sound. Randomised on construction. */
+    float ambientSoundTimer;
+
+    /**
+     * Accumulated horizontal distance (blocks) since the last footstep sound.
+     * Managed externally by {@link com.blockgame.mob.MobManager}.
+     */
+    float stepSoundAccumulator = 0f;
+
     private final Random random;
 
     // -------------------------------------------------------------------------
@@ -95,6 +104,8 @@ public class Mob {
         this.wanderTimer     = random.nextFloat() * WANDER_MOVE_MAX;
         this.isMoving        = true;
         this.yaw             = wanderTargetYaw;
+        // Stagger ambient sounds so mobs don't all speak at the same time
+        this.ambientSoundTimer = 5f + random.nextFloat() * 15f;
     }
 
     // -------------------------------------------------------------------------
