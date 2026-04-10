@@ -80,6 +80,11 @@ public class MobRenderer {
     private static final Vector3f LIGHT_DIR =
         new Vector3f(-0.4f, -1.0f, -0.3f).normalize();
 
+    // Fog parameters – updated each frame by the Renderer based on player state
+    private Vector3f fogColor = new Vector3f(0.53f, 0.81f, 0.98f);
+    private float fogStart = ((World.RENDER_DISTANCE - 3) * Chunk.SIZE) * 0.6f;
+    private float fogEnd   =  (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
@@ -132,6 +137,16 @@ public class MobRenderer {
     }
 
     /**
+     * Updates the fog parameters used when rendering mobs.  Should be called
+     * each frame by {@link Renderer} with the appropriate fog settings.
+     */
+    public void setFogParams(Vector3f color, float start, float end) {
+        this.fogColor = color;
+        this.fogStart = start;
+        this.fogEnd   = end;
+    }
+
+    /**
      * Renders all mobs.  Must be called from the OpenGL thread, after the world
      * pass and before the HUD pass.
      *
@@ -152,9 +167,9 @@ public class MobRenderer {
         shader.setFloat("ambientStrength", 0.40f);
         shader.setInt("uTexture", 0);
 
-        float fogEnd = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
-        shader.setVector3f("uFogColor", new Vector3f(0.53f, 0.81f, 0.98f));
-        shader.setFloat("uFogStart", fogEnd * 0.6f);
+        // Apply fog – use the parameters set externally (underwater or normal sky)
+        shader.setVector3f("uFogColor", fogColor);
+        shader.setFloat("uFogStart", fogStart);
         shader.setFloat("uFogEnd",   fogEnd);
 
         // Opaque primary passes (one draw call per mob type)

@@ -136,6 +136,7 @@ public class Game {
 
         // Mob manager – spawns and updates all Classic-era mobs
         MobManager mobManager = new MobManager(world);
+        mobManager.setPlayer(player);
         mobManager.spawnInitial(player.getPosition());
         renderer.setMobManager(mobManager);
 

@@ -33,5 +33,6 @@
   "coal_ore":          "coal_ore",
   "iron_ore":          "iron_ore",
   "gold_ore":          "gold_ore",
-  "bedrock":           "bedrock"
+  "bedrock":           "bedrock",
+  "sapling":           "oak_sapling"
 }

@@ -20,8 +20,11 @@ import java.io.IOException;
  *   <li>Mouse-look (updates {@link Camera} yaw / pitch)</li>
  *   <li>WASD + sprint movement projected onto the XZ plane</li>
  *   <li>Gravity, jumping, and simple AABB collision against the world</li>
+ *   <li>Fall damage and death / respawn</li>
  *   <li>Block placement (right-click) and removal (left-click)</li>
  *   <li>Hotbar selection (keys 1-8 or scroll wheel)</li>
+ *   <li>Drowning (air / oxygen) system</li>
+ *   <li>Hunger system</li>
  * </ul>
  *
  * <p>All input is queried via named {@link InputAction}s so that key bindings
@@ -33,7 +36,8 @@ public class Player implements Saveable {
     private static final float MOVE_SPEED        = 5.0f;
     private static final float SPRINT_SPEED      = 8.5f;
     private static final float JUMP_VELOCITY     = 8.5f;
-    private static final float GRAVITY           = -22.0f;
+    /** Gravity stronger than original (was -22) to reduce floatiness. */
+    private static final float GRAVITY           = -28.0f;
 
     // Swimming physics constants
     /** Horizontal movement speed while in water (70 % of land speed). */
@@ -62,7 +66,7 @@ public class Player implements Saveable {
     private static final BlockType[] HOTBAR = {
         BlockType.GRASS, BlockType.COBBLESTONE, BlockType.STONE,
         BlockType.WOOD,  BlockType.PLANKS, BlockType.BRICKS,
-        BlockType.TNT,   BlockType.GLASS
+        BlockType.TNT,   BlockType.OAK_SAPLING
     };
 
     // Ordered hotbar input actions matching the HOTBAR array indices
@@ -71,6 +75,26 @@ public class Player implements Saveable {
         InputAction.HOTBAR_4, InputAction.HOTBAR_5, InputAction.HOTBAR_6,
         InputAction.HOTBAR_7, InputAction.HOTBAR_8
     };
+
+    // Fall-damage constants
+    /** Fall distance (blocks) before damage is applied. */
+    private static final float SAFE_FALL_DISTANCE = 3.0f;
+
+    // Drowning constants
+    /** Maximum air supply (same as Minecraft's 300 bubbles). */
+    public static final int MAX_AIR = 300;
+    /** Seconds between drowning damage ticks (1 HP per second). */
+    private static final float DROWN_DAMAGE_INTERVAL = 1.0f;
+
+    // Hunger constants
+    /** Maximum food level (20 = 10 food icons). */
+    public static final int MAX_FOOD = 20;
+    /** Seconds to deplete 1 food point while active. */
+    private static final float FOOD_DRAIN_INTERVAL = 80.0f;
+    /** Seconds to lose 1 HP from starvation (food = 0). */
+    private static final float STARVE_DAMAGE_INTERVAL = 4.0f;
+    /** Seconds to regen 1 HP when well-fed (food >= 18). */
+    private static final float REGEN_INTERVAL = 2.0f;
 
     // State
     private final Vector3f position    = new Vector3f(0, 72, 0);
@@ -99,6 +123,28 @@ public class Player implements Saveable {
     private static final int MAX_HEALTH = 20; // 20 HP = 10 hearts
     private int health = MAX_HEALTH;
 
+    // Drowning / air system
+    private int air = MAX_AIR;
+    private float drownDamageTimer = 0f;
+
+    // Hunger system
+    private int food = MAX_FOOD;
+    private float foodDrainTimer  = 0f;
+    private float starveDmgTimer  = 0f;
+    private float regenTimer      = 0f;
+
+    // Fall damage tracking
+    /** Y position when the player was last on the ground or left the ground. */
+    private float fallStartY = 0f;
+    /** Whether the player was airborne and falling last frame. */
+    private boolean wasFalling = false;
+
+    // Combat: set when the player left-clicks without a block target
+    private boolean attackSwingPending = false;
+
+    // Spawn position (used for respawn after death)
+    private float spawnX = 0f, spawnY = 72f, spawnZ = 0f;
+
     // Whether the mouse cursor is captured (first-person look active)
     private boolean mouseCaptured = true;
 
@@ -118,6 +164,10 @@ public class Player implements Saveable {
         // Spawn on top of terrain at world origin
         int spawnY = world.getTerrainHeight(0, 0) + 1;
         position.set(0, spawnY, 0);
+        this.spawnX = 0f;
+        this.spawnY = spawnY;
+        this.spawnZ = 0f;
+        this.fallStartY = spawnY;
     }
 
     // -------------------------------------------------------------------------
@@ -125,11 +175,17 @@ public class Player implements Saveable {
     // -------------------------------------------------------------------------
 
     public void update(float dt) {
+        if (health <= 0) {
+            respawn();
+            return;
+        }
         handleMouseLook();
         handleMovement(dt);
         updateTargetedBlock();
         handleBlockActions();
         handleHotbarKeys();
+        updateDrowning(dt);
+        updateHunger(dt);
 
         // Sync camera position and orientation
         camera.setPosition(new Vector3f(position.x, position.y + EYE_HEIGHT, position.z));
@@ -218,8 +274,27 @@ public class Player implements Saveable {
             velocityY += GRAVITY * dt;
         }
 
+        // Track fall for fall-damage calculation
+        boolean fallingBeforeMove = !onGround && velocityY < 0f && !inWater;
+        if (fallingBeforeMove && !wasFalling) {
+            fallStartY = position.y;
+        }
+
         // Apply movement with collision
+        float prevY = position.y;
         moveWithCollision(moveX, velocityY * dt, moveZ);
+
+        // Fall damage: player just landed (was falling, now on ground)
+        if (!inWater && wasFalling && fallingBeforeMove && onGround) {
+            float fallen = fallStartY - prevY;
+            if (fallen > SAFE_FALL_DISTANCE) {
+                int dmg = (int) (fallen - SAFE_FALL_DISTANCE);
+                if (dmg > 0) damage(dmg);
+            }
+            wasFalling = false;
+        } else {
+            wasFalling = fallingBeforeMove;
+        }
     }
 
     private void moveWithCollision(float dx, float dy, float dz) {
@@ -324,6 +399,87 @@ public class Player implements Saveable {
     }
 
     // -------------------------------------------------------------------------
+    // Drowning system
+    // -------------------------------------------------------------------------
+
+    private void updateDrowning(float dt) {
+        if (isEyeUnderwater()) {
+            // Drain air while submerged
+            float drain = (float) MAX_AIR / 15.0f * dt; // 15 seconds to fully drain
+            air = Math.max(0, air - (int) Math.ceil(drain));
+
+            if (air <= 0) {
+                // Drown damage: 1 HP per DROWN_DAMAGE_INTERVAL seconds
+                drownDamageTimer += dt;
+                if (drownDamageTimer >= DROWN_DAMAGE_INTERVAL) {
+                    drownDamageTimer -= DROWN_DAMAGE_INTERVAL;
+                    damage(1);
+                }
+            }
+        } else {
+            // Refill air quickly when surfaced
+            float refill = (float) MAX_AIR / 3.0f * dt; // refill in ~3 seconds
+            air = Math.min(MAX_AIR, air + (int) Math.ceil(refill));
+            drownDamageTimer = 0f;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Hunger system
+    // -------------------------------------------------------------------------
+
+    private void updateHunger(float dt) {
+        // Drain food over time
+        foodDrainTimer += dt;
+        if (foodDrainTimer >= FOOD_DRAIN_INTERVAL) {
+            foodDrainTimer -= FOOD_DRAIN_INTERVAL;
+            food = Math.max(0, food - 1);
+        }
+
+        if (food == 0) {
+            // Starvation: lose 1 HP every STARVE_DAMAGE_INTERVAL seconds.
+            // Starvation stops at 1 HP (it will not kill the player directly –
+            // only hostile mobs or drowning can deliver the final blow).
+            starveDmgTimer += dt;
+            if (starveDmgTimer >= STARVE_DAMAGE_INTERVAL) {
+                starveDmgTimer -= STARVE_DAMAGE_INTERVAL;
+                if (health > 1) damage(1);
+            }
+        } else {
+            starveDmgTimer = 0f;
+        }
+
+        // Health regeneration when well-fed (food >= 18) and not at max health
+        if (food >= 18 && health < MAX_HEALTH) {
+            regenTimer += dt;
+            if (regenTimer >= REGEN_INTERVAL) {
+                regenTimer -= REGEN_INTERVAL;
+                heal(1);
+            }
+        } else {
+            regenTimer = 0f;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Death & respawn
+    // -------------------------------------------------------------------------
+
+    private void respawn() {
+        health = MAX_HEALTH;
+        food   = MAX_FOOD;
+        air    = MAX_AIR;
+        velocityY = 0f;
+        onGround  = false;
+        wasFalling = false;
+        position.set(spawnX, spawnY, spawnZ);
+        foodDrainTimer  = 0f;
+        starveDmgTimer  = 0f;
+        regenTimer      = 0f;
+        drownDamageTimer = 0f;
+    }
+
+    // -------------------------------------------------------------------------
     // Block interaction (DDA ray cast)
     // -------------------------------------------------------------------------
 
@@ -344,6 +500,9 @@ public class Player implements Saveable {
                     particleSystem.spawn(hit[0], hit[1], hit[2], broken);
                 }
                 lastBlockActionMs = now;
+            } else {
+                // No block in range – flag a melee attack swing
+                attackSwingPending = true;
             }
         } else if (input.isActionDown(InputAction.PLACE_BLOCK)) {
             int[] adjacent = raycast(false);
@@ -567,6 +726,56 @@ public class Player implements Saveable {
     public void heal(int amount) {
         health = Math.min(MAX_HEALTH, health + amount);
     }
+
+    // -------------------------------------------------------------------------
+    // Drowning / air system
+    // -------------------------------------------------------------------------
+
+    /** Returns the current air supply (0–{@link #MAX_AIR}). */
+    public int getAir() { return air; }
+
+    /** Returns the maximum air supply ({@link #MAX_AIR}). */
+    public int getMaxAir() { return MAX_AIR; }
+
+    // -------------------------------------------------------------------------
+    // Hunger system
+    // -------------------------------------------------------------------------
+
+    /** Returns the current food level (0–{@link #MAX_FOOD}). */
+    public int getFood() { return food; }
+
+    /** Returns the maximum food level ({@link #MAX_FOOD}). */
+    public int getMaxFood() { return MAX_FOOD; }
+
+    // -------------------------------------------------------------------------
+    // Combat
+    // -------------------------------------------------------------------------
+
+    /**
+     * Consumes and returns the pending attack-swing flag.  Returns {@code true}
+     * once per left-click when no block was in range, then resets to
+     * {@code false}.  Called by {@link com.blockgame.mob.MobManager}.
+     */
+    public boolean consumeAttackSwing() {
+        boolean result = attackSwingPending;
+        attackSwingPending = false;
+        return result;
+    }
+
+    /**
+     * Returns the player's normalised look direction projected onto the XZ plane
+     * as a float[2] {x, z}.  Used by mob combat for aim checking.
+     */
+    public float[] getLookDirectionXZ() {
+        Vector3f dir = camera.getDirection();
+        float len = (float) Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+        if (len < 0.001f) return new float[]{0f, -1f};
+        return new float[]{dir.x / len, dir.z / len};
+    }
+
+    // -------------------------------------------------------------------------
+    // Mouse capture
+    // -------------------------------------------------------------------------
 
     /**
      * Enables or disables first-person mouse look (cursor capture).

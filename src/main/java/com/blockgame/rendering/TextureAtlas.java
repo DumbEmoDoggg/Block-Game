@@ -88,6 +88,7 @@ public class TextureAtlas {
     public static final int TILE_IRON_ORE         = 30;
     public static final int TILE_GOLD_ORE         = 31;
     public static final int TILE_BEDROCK          = 32;
+    public static final int TILE_OAK_SAPLING      = 33;
 
     private final int textureId;
     private final int iconTextureId;
@@ -104,7 +105,7 @@ public class TextureAtlas {
         BlockType.STONE_SLAB,   BlockType.OBSIDIAN,     BlockType.GRAVEL,
         BlockType.COAL_ORE,     BlockType.IRON_ORE,     BlockType.GOLD_ORE,
         BlockType.DANDELION,    BlockType.POPPY,        BlockType.BROWN_MUSHROOM,
-        BlockType.RED_MUSHROOM
+        BlockType.RED_MUSHROOM, BlockType.OAK_SAPLING
     };
     public static final int ICON_SIZE   = 32; // pixels per icon
     public static final int ICON_COUNT  = ICON_BLOCKS.length;
@@ -226,6 +227,7 @@ public class TextureAtlas {
             case IRON_ORE:         return TILE_IRON_ORE;
             case GOLD_ORE:         return TILE_GOLD_ORE;
             case BEDROCK:          return TILE_BEDROCK;
+            case OAK_SAPLING:      return TILE_OAK_SAPLING;
             default:               return TILE_STONE;
         }
     }
@@ -253,19 +255,26 @@ public class TextureAtlas {
             BlockType block = ICON_BLOCKS[i];
             int ox = i * ICON_SIZE; // x offset in icon atlas
 
-            // Extract face tiles from the main atlas
-            BufferedImage topTile   = extractTile(mainAtlas, getTileId(block, true,  false));
-            BufferedImage sideTile  = extractTile(mainAtlas, getTileId(block, false, true));
-            BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
+            if (block.isPlant()) {
+                // Plant blocks (sapling, flowers, mushrooms) are flat cross-shaped
+                // sprites — render their texture directly as a 2D flat icon.
+                BufferedImage tile = extractTile(mainAtlas, getTileId(block, false, false));
+                drawFlatIcon(iconAtlas, tile, ox);
+            } else {
+                // Extract face tiles from the main atlas
+                BufferedImage topTile   = extractTile(mainAtlas, getTileId(block, true,  false));
+                BufferedImage sideTile  = extractTile(mainAtlas, getTileId(block, false, true));
+                BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
 
-            // --- Isometric layout (pixel art style) ---
-            // The icon is 32×32. We draw side faces first, then top face on top.
-            //   Left face:  left half  (x=0..15),  y=8..31
-            //   Right face: right half (x=16..31), y=8..31
-            //   Top face:   full-width diamond,     y=0..15 (drawn last, in front)
-            drawIsometricLeft(iconAtlas, sideTile, ox);
-            drawIsometricRight(iconAtlas, rightTile, ox);
-            drawIsometricTop(iconAtlas, topTile, ox);
+                // --- Isometric layout (pixel art style) ---
+                // The icon is 32×32. We draw side faces first, then top face on top.
+                //   Left face:  left half  (x=0..15),  y=8..31
+                //   Right face: right half (x=16..31), y=8..31
+                //   Top face:   full-width diamond,     y=0..15 (drawn last, in front)
+                drawIsometricLeft(iconAtlas, sideTile, ox);
+                drawIsometricRight(iconAtlas, rightTile, ox);
+                drawIsometricTop(iconAtlas, topTile, ox);
+            }
         }
 
         g2.dispose();
@@ -384,6 +393,31 @@ public class TextureAtlas {
         }
     }
 
+    /**
+     * Draws a flat (2-D) icon for plant blocks into {@code dest} at x-offset {@code ox}.
+     *
+     * <p>The 16×16 tile is scaled up 2× (nearest-neighbour) to fill the full
+     * {@link #ICON_SIZE}×{@link #ICON_SIZE} slot, so the sprite appears centred and
+     * clearly readable in the hotbar without any isometric projection.
+     */
+    private static void drawFlatIcon(BufferedImage dest, BufferedImage tile, int ox) {
+        int scale = ICON_SIZE / TILE_SIZE; // 2
+        for (int sy = 0; sy < TILE_SIZE; sy++) {
+            for (int sx = 0; sx < TILE_SIZE; sx++) {
+                int argb = tile.getRGB(sx, sy);
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        int px = ox + sx * scale + dx;
+                        int py = sy * scale + dy;
+                        if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+                            dest.setRGB(px, py, argb);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /** Multiplies the RGB channels of an ARGB color by {@code factor}, preserving alpha. */
     private static int darkenColor(int argb, float factor) {
         int a = (argb >> 24) & 0xFF;
@@ -428,6 +462,7 @@ public class TextureAtlas {
         drawTile(img, TILE_IRON_ORE,        loadTile(textureName("iron_ore"),        () -> stone()));
         drawTile(img, TILE_GOLD_ORE,        loadTile(textureName("gold_ore"),        () -> stone()));
         drawTile(img, TILE_BEDROCK,         loadTile(textureName("bedrock"),         () -> solid(46, 46, 46)));
+        drawTile(img, TILE_OAK_SAPLING,     loadTile(textureName("sapling"),         () -> solid(34, 139, 34)));
 
         return img;
     }

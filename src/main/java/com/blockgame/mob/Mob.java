@@ -33,6 +33,16 @@ public class Mob {
     private static final float WANDER_IDLE_MIN = 1.0f;
     private static final float WANDER_IDLE_MAX = 3.0f;
 
+    // Combat constants
+    /** Distance at which a hostile mob can deal damage to the player (blocks). */
+    private static final float ATTACK_RANGE   = 1.8f;
+    /** Seconds between attacks. */
+    private static final float ATTACK_COOLDOWN = 1.0f;
+    /** Hit points dealt per attack. */
+    private static final int   ATTACK_DAMAGE   = 1;
+    /** Chase speed multiplier (hostile mobs walk faster when chasing). */
+    private static final float CHASE_SPEED     = WALK_SPEED * 1.5f;
+
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
@@ -58,8 +68,15 @@ public class Mob {
     /** Whether the mob is currently walking (used for animation). */
     public boolean isMoving;
 
+    // Health
+    private int health;
+    private boolean alive = true;
+
     private float wanderTimer;
     private float wanderTargetYaw;
+
+    /** Cooldown timer between mob attacks (seconds). */
+    private float attackTimer = 0f;
 
     private final Random random;
 
@@ -70,6 +87,7 @@ public class Mob {
     public Mob(float x, float y, float z, long seed, MobType type) {
         this.type   = type;
         this.height = type.height;
+        this.health = type.maxHealth;
         this.position = new Vector3f(x, y, z);
         this.random   = new Random(seed);
         // Randomise initial wander state so mobs don't all start together
@@ -84,6 +102,8 @@ public class Mob {
     // -------------------------------------------------------------------------
 
     public void update(float dt, World world) {
+        if (!alive) return;
+        if (attackTimer > 0f) attackTimer -= dt;
         tickWanderAI(dt);
         applyMovement(dt, world);
     }
@@ -137,6 +157,58 @@ public class Mob {
         moveWithCollision(moveX, velocityY * dt, moveZ, world);
     }
 
+    /**
+     * Steers this mob toward {@code target} and returns whether it is within
+     * attack range.  Called by {@link com.blockgame.mob.MobManager} each frame
+     * for hostile mobs when a player target is known.
+     *
+     * @param targetX  target world X
+     * @param targetZ  target world Z
+     * @param dt       frame delta time in seconds
+     * @param world    the world (for movement collision)
+     * @return {@code true} if the mob is within melee range this frame
+     */
+    public boolean chaseAndAttack(float targetX, float targetZ, float dt, World world) {
+        float dx = targetX - position.x;
+        float dz = targetZ - position.z;
+        float dist = (float) Math.sqrt(dx * dx + dz * dz);
+
+        // Turn to face target
+        wanderTargetYaw = (float) Math.toDegrees(Math.atan2(dx, -dz));
+        float diff = wanderTargetYaw - yaw;
+        while (diff >  180f) diff -= 360f;
+        while (diff < -180f) diff += 360f;
+        yaw += Math.signum(diff) * Math.min(Math.abs(diff), 360f * dt);
+
+        float moveX = 0f, moveZ = 0f;
+        if (dist > ATTACK_RANGE) {
+            float yr = (float) Math.toRadians(yaw);
+            moveX =  (float) Math.sin(yr) * CHASE_SPEED * dt;
+            moveZ = -(float) Math.cos(yr) * CHASE_SPEED * dt;
+            isMoving = true;
+            limbSwing += SWING_SPEED * dt;
+        } else {
+            isMoving = false;
+        }
+
+        velocityY += GRAVITY * dt;
+        moveWithCollision(moveX, velocityY * dt, moveZ, world);
+
+        // Return true if within melee range and attack cooldown is ready
+        if (dist <= ATTACK_RANGE && attackTimer <= 0f) {
+            attackTimer = ATTACK_COOLDOWN;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the hit points this mob deals per attack.
+     */
+    public int getAttackDamage() {
+        return ATTACK_DAMAGE;
+    }
+
     private void moveWithCollision(float dx, float dy, float dz, World world) {
         // Y axis
         position.y += dy;
@@ -187,6 +259,29 @@ public class Mob {
             (int) Math.floor(z)
         ).solid;
     }
+
+    // -------------------------------------------------------------------------
+    // Health & combat
+    // -------------------------------------------------------------------------
+
+    /**
+     * Deals {@code amount} damage to this mob.  If health drops to 0 the mob
+     * is marked dead and will be removed by {@link com.blockgame.mob.MobManager}.
+     */
+    public void damage(int amount) {
+        if (!alive) return;
+        health = Math.max(0, health - amount);
+        if (health == 0) alive = false;
+    }
+
+    /** Returns {@code true} while this mob has HP remaining. */
+    public boolean isAlive() { return alive; }
+
+    /** Returns current hit points. */
+    public int getHealth() { return health; }
+
+    /** Returns maximum hit points (from {@link MobType#maxHealth}). */
+    public int getMaxHealth() { return type.maxHealth; }
 
     // -------------------------------------------------------------------------
     // Getters
