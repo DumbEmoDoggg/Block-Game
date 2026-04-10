@@ -151,6 +151,24 @@ public class Renderer {
     // Underwater overlay: a full-screen quad tinted with the underwater fog colour
     private int underwaterVao, underwaterVbo;
 
+    // Arm / held-item rendering
+    private int armTexId;
+    private int armVao, armVbo;
+    private int heldItemVao, heldItemVbo;
+    // Arm display dimensions (in logical pixels; multiply by GUI_SCALE for screen pixels)
+    private static final float ARM_W_PX          = 70.0f;  // arm width
+    private static final float ARM_H_PX          = 120.0f; // visible arm height
+    private static final float ARM_SKEW_PX       = 60.0f;  // top shifts left by this much
+    private static final float ARM_RIGHT_PX      =  4.0f;  // gap from right edge of screen
+    private static final float ARM_BELOW_PX      = 20.0f;  // arm bottom extends this far below screen
+    // Held-item block icon size (logical pixels; × GUI_SCALE = screen pixels)
+    private static final float HELD_ICON_PX      = 32.0f;
+    // Vertical gap between arm top and held-item icon bottom (logical pixels)
+    private static final float HELD_ICON_RAISE_PX =  4.0f;
+    // Pre-allocated per-frame buffers for arm and held-item geometry (6 vertices × 4 floats each)
+    private final FloatBuffer armBuf      = BufferUtils.createFloatBuffer(6 * 4);
+    private final FloatBuffer heldItemBuf = BufferUtils.createFloatBuffer(6 * 4);
+
     private int viewportW, viewportH;
     // Tracks the viewport dimensions at which the hotbar background geometry was last built
     private int hotbarGeomViewportW, hotbarGeomViewportH;
@@ -186,6 +204,7 @@ public class Renderer {
         buildIconHotbar();
         buildHighlight();
         buildUnderwaterOverlay();
+        buildArm();
 
         // Load GUI overlay images (crosshair, hotbar background, hearts)
         crosshairTexId  = loadGuiTexture("crosshair");
@@ -197,6 +216,7 @@ public class Renderer {
         foodFullTexId    = loadGuiTexture("food_full");
         foodHalfTexId    = loadGuiTexture("food_half");
         foodEmptyTexId   = loadGuiTexture("food_empty");
+        armTexId         = buildArmTexture();
 
         // Read initial framebuffer size BEFORE building viewport-dependent geometry
         IntBuffer w = BufferUtils.createIntBuffer(1);
@@ -671,6 +691,9 @@ public class Renderer {
         if (player.isEyeUnderwater() || player.getAir() < Player.MAX_AIR) {
             renderAirBubbles();
         }
+
+        // --- Player arm / held-item (bottom-right corner) ---
+        renderArm();
 
         // --- Crosshair image (textured quad using GUI/crosshair.png) ---
         if (crosshairTexId != 0) {
@@ -1370,6 +1393,203 @@ public class Renderer {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
+    // -------------------------------------------------------------------------
+    // Player arm / held-item
+    // -------------------------------------------------------------------------
+
+    /**
+     * Allocates the VAO/VBOs used to render the player's arm and held block.
+     * Both quads are fully re-uploaded each frame in {@link #renderArm()}.
+     */
+    private void buildArm() {
+        int stride = 4 * Float.BYTES; // 2 pos + 2 uv
+
+        armVao = glGenVertexArrays();
+        armVbo = glGenBuffers();
+        glBindVertexArray(armVao);
+        glBindBuffer(GL_ARRAY_BUFFER, armVbo);
+        glBufferData(GL_ARRAY_BUFFER, (long)(6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+
+        heldItemVao = glGenVertexArrays();
+        heldItemVbo = glGenBuffers();
+        glBindVertexArray(heldItemVao);
+        glBindBuffer(GL_ARRAY_BUFFER, heldItemVbo);
+        glBufferData(GL_ARRAY_BUFFER, (long)(6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders the player's arm in the lower-right corner of the screen.
+     * The arm is a parallelogram that leans toward the center (Minecraft-style).
+     * If the selected hotbar slot contains a block that has an icon, the block's
+     * icon is rendered at the hand position (top of the arm).
+     */
+    private void renderArm() {
+        if (armTexId == 0) return;
+
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+        glActiveTexture(GL_TEXTURE0);
+
+        // --- Compute arm parallelogram geometry ---
+        float armWpx    = ARM_W_PX    * GUI_SCALE;
+        float armHpx    = ARM_H_PX    * GUI_SCALE;
+        float armSkewPx = ARM_SKEW_PX * GUI_SCALE;
+        float rightPx   = ARM_RIGHT_PX * GUI_SCALE;
+        float belowPx   = ARM_BELOW_PX * GUI_SCALE;
+
+        // NDC fallback values below assume a 1280×720 viewport
+        // (armWpx/viewportW * 2, armHpx/viewportH * 2, etc.)
+        float armW    = (viewportW > 0) ? 2.0f * armWpx    / viewportW : 0.109375f;
+        float armH    = (viewportH > 0) ? 2.0f * armHpx    / viewportH : 0.33333f;
+        float skewX   = (viewportW > 0) ? 2.0f * armSkewPx / viewportW : 0.09375f;
+        float rightOff = (viewportW > 0) ? 2.0f * rightPx   / viewportW : 0.00625f;
+        float belowOff = (viewportH > 0) ? 2.0f * belowPx   / viewportH : 0.05556f;
+
+        // Arm corners in NDC (screen right=+1.0, screen bottom=-1.0).
+        // Bottom edge is partially below the visible screen so the arm appears
+        // to extend naturally from outside the frame.
+        float brX =  1.0f - rightOff;          // bottom-right x
+        float brY = -1.0f - belowOff;          // bottom-right y (below screen)
+        float blX = brX - armW;                // bottom-left x
+        float blY = brY;                       // bottom-left y
+        float trX = brX - skewX;              // top-right x (lean toward center)
+        float trY = brY + armH;               // top-right y (visible)
+        float tlX = trX - armW;               // top-left x
+        float tlY = trY;                       // top-left y
+
+        // UV: v=0 → top of arm texture (hand), v=1 → bottom (sleeve)
+        armBuf.clear();
+        armBuf.put(blX).put(blY).put(0f).put(1f);
+        armBuf.put(brX).put(brY).put(1f).put(1f);
+        armBuf.put(trX).put(trY).put(1f).put(0f);
+        armBuf.put(blX).put(blY).put(0f).put(1f);
+        armBuf.put(trX).put(trY).put(1f).put(0f);
+        armBuf.put(tlX).put(tlY).put(0f).put(0f);
+        armBuf.flip();
+
+        glBindBuffer(GL_ARRAY_BUFFER, armVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, armBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+        glBindTexture(GL_TEXTURE_2D, armTexId);
+        glBindVertexArray(armVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // --- Draw held block icon at the hand (top of arm) ---
+        BlockType selected = player.getSelectedBlock();
+        int iconIdx = TextureAtlas.getIconIndex(selected);
+        if (iconIdx >= 0) {
+            float heldPx = HELD_ICON_PX * GUI_SCALE;
+            // NDC fallback values assume a 1280×720 viewport
+            float heldW  = (viewportW > 0) ? 2.0f * heldPx / viewportW : 0.1f;
+            float heldH  = (viewportH > 0) ? 2.0f * heldPx / viewportH : 0.17778f;
+
+            // Position: centred on the arm's top edge, raised slightly above it
+            float armTopCenterX = (tlX + trX) / 2.0f;
+            float raiseOff = (viewportH > 0) ? 2.0f * (HELD_ICON_RAISE_PX * GUI_SCALE) / viewportH : 0.02222f;
+            float iy1 = trY + raiseOff;       // top of icon
+            float iy0 = iy1 - heldH;          // bottom of icon
+            float ix0 = armTopCenterX - heldW / 2.0f;
+            float ix1 = armTopCenterX + heldW / 2.0f;
+
+            float[] uv = TextureAtlas.getIconUV(iconIdx);
+            float u0 = uv[0], v0 = uv[1], u1 = uv[2], v1 = uv[3];
+
+            heldItemBuf.clear();
+            heldItemBuf.put(ix0).put(iy0).put(u0).put(v1);
+            heldItemBuf.put(ix1).put(iy0).put(u1).put(v1);
+            heldItemBuf.put(ix1).put(iy1).put(u1).put(v0);
+            heldItemBuf.put(ix0).put(iy0).put(u0).put(v1);
+            heldItemBuf.put(ix1).put(iy1).put(u1).put(v0);
+            heldItemBuf.put(ix0).put(iy1).put(u0).put(v0);
+            heldItemBuf.flip();
+
+            glBindBuffer(GL_ARRAY_BUFFER, heldItemVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, heldItemBuf);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+            textureAtlas.bindIcons();
+            glBindVertexArray(heldItemVao);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    /**
+     * Generates a simple brown arm texture programmatically.
+     * The arm is 16×48 pixels with horizontal shading to give a rounded look.
+     *
+     * @return OpenGL texture ID
+     */
+    private static int buildArmTexture() {
+        int w = 16, h = 48;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+
+        // Base skin colour (warm brown, similar to a Minecraft character)
+        int mainR = 0xC7, mainG = 0x85, mainB = 0x40;
+
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                // Horizontal shading: dark shadow on the left quarter,
+                // full brightness in the middle, slight shadow on the right quarter.
+                float hFactor;
+                if (x < w / 4) {
+                    hFactor = 0.55f + 0.15f * ((float) x / (w / 4));
+                } else if (x > w * 3 / 4) {
+                    hFactor = 0.85f - 0.10f * ((float)(x - w * 3 / 4) / (w / 4));
+                } else {
+                    hFactor = 1.0f;
+                }
+                // Vertical shading: slightly darker toward the bottom (down-light)
+                float vFactor = 1.0f - 0.12f * ((float) y / h);
+                float factor = hFactor * vFactor;
+
+                int r = Math.min(255, (int)(mainR * factor));
+                int g = Math.min(255, (int)(mainG * factor));
+                int b = Math.min(255, (int)(mainB * factor));
+
+                img.setRGB(x, y, (255 << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+
+        int tw = img.getWidth();
+        int th = img.getHeight();
+        int[] pixels = img.getRGB(0, 0, tw, th, null, 0, tw);
+        ByteBuffer buf = BufferUtils.createByteBuffer(tw * th * 4);
+        for (int pixel : pixels) {
+            buf.put((byte) ((pixel >> 16) & 0xFF)); // R
+            buf.put((byte) ((pixel >>  8) & 0xFF)); // G
+            buf.put((byte) ( pixel        & 0xFF)); // B
+            buf.put((byte) ((pixel >> 24) & 0xFF)); // A
+        }
+        buf.flip();
+
+        int id = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, id);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return id;
+    }
+
     /**
      * Loads a PNG image from {@code /GUI/<name>.png} on the classpath and
      * uploads it to the GPU as an RGBA texture with nearest-neighbour filtering.
@@ -1532,5 +1752,10 @@ public class Renderer {
         if (foodEmptyTexId != 0) glDeleteTextures(foodEmptyTexId);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
+        glDeleteVertexArrays(armVao);
+        glDeleteBuffers(armVbo);
+        glDeleteVertexArrays(heldItemVao);
+        glDeleteBuffers(heldItemVbo);
+        if (armTexId != 0) glDeleteTextures(armTexId);
     }
 }
