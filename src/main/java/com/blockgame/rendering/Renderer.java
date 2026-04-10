@@ -156,9 +156,10 @@ public class Renderer {
     private int armVao, armVbo;
     private int heldItemVao, heldItemVbo;
     // Arm display dimensions (in logical pixels; multiply by GUI_SCALE for screen pixels)
-    private static final float ARM_W_PX          = 70.0f;  // arm width
-    private static final float ARM_H_PX          = 120.0f; // visible arm height
-    private static final float ARM_SKEW_PX       = 60.0f;  // top shifts left by this much
+    private static final float ARM_W_PX          = 40.0f;  // arm width
+    // Total parallelogram height; visible on-screen = (ARM_H_PX - ARM_BELOW_PX) × GUI_SCALE pixels
+    private static final float ARM_H_PX          = 85.0f;
+    private static final float ARM_SKEW_PX       = 25.0f;  // top shifts left by this much (parallelogram lean)
     private static final float ARM_RIGHT_PX      =  4.0f;  // gap from right edge of screen
     private static final float ARM_BELOW_PX      = 20.0f;  // arm bottom extends this far below screen
     // Held-item block icon size (logical pixels; × GUI_SCALE = screen pixels)
@@ -1449,11 +1450,12 @@ public class Renderer {
         float rightPx   = ARM_RIGHT_PX * GUI_SCALE;
         float belowPx   = ARM_BELOW_PX * GUI_SCALE;
 
-        // NDC fallback values below assume a 1280×720 viewport
-        // (armWpx/viewportW * 2, armHpx/viewportH * 2, etc.)
-        float armW    = (viewportW > 0) ? 2.0f * armWpx    / viewportW : 0.109375f;
-        float armH    = (viewportH > 0) ? 2.0f * armHpx    / viewportH : 0.33333f;
-        float skewX   = (viewportW > 0) ? 2.0f * armSkewPx / viewportW : 0.09375f;
+        // NDC fallback values below assume a 1280×720 viewport.
+        // Note: armWpx/armHpx/armSkewPx already include the GUI_SCALE factor.
+        // e.g. armH fallback = 2 * (85*2) / 720 = 0.47222
+        float armW    = (viewportW > 0) ? 2.0f * armWpx    / viewportW : 0.125f;
+        float armH    = (viewportH > 0) ? 2.0f * armHpx    / viewportH : 0.47222f;
+        float skewX   = (viewportW > 0) ? 2.0f * armSkewPx / viewportW : 0.078125f;
         float rightOff = (viewportW > 0) ? 2.0f * rightPx   / viewportW : 0.00625f;
         float belowOff = (viewportH > 0) ? 2.0f * belowPx   / viewportH : 0.05556f;
 
