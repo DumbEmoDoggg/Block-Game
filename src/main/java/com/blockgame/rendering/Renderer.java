@@ -137,8 +137,8 @@ public class Renderer {
     // Gap between bubbles, in texture pixels
     private static final float BUBBLE_GAP_PX = 1.0f;
 
-    // Food bar textures (food_full.png, food_empty.png)
-    private int foodFullTexId, foodEmptyTexId;
+    // Food bar textures (food_full.png, food_half.png, food_empty.png)
+    private int foodFullTexId, foodHalfTexId, foodEmptyTexId;
     // VAO/VBO for the food bar (re-uploaded each frame)
     private int foodVao, foodVbo;
     // Number of food icons (10 = MAX_FOOD / 2)
@@ -195,6 +195,7 @@ public class Renderer {
         bubbleFullTexId  = loadGuiTexture("bubble_full");
         bubbleEmptyTexId = loadGuiTexture("bubble_empty");
         foodFullTexId    = loadGuiTexture("food_full");
+        foodHalfTexId    = loadGuiTexture("food_half");
         foodEmptyTexId   = loadGuiTexture("food_empty");
 
         // Read initial framebuffer size BEFORE building viewport-dependent geometry
@@ -1266,7 +1267,7 @@ public class Renderer {
      * hearts on the left.
      */
     private void renderFoodBar() {
-        if (foodFullTexId == 0 || foodEmptyTexId == 0) return;
+        if (foodFullTexId == 0 || foodHalfTexId == 0 || foodEmptyTexId == 0) return;
 
         iconShader.use();
         iconShader.setInt("uIcons", 0);
@@ -1319,12 +1320,24 @@ public class Renderer {
         glBindVertexArray(foodVao);
         glDrawArrays(GL_TRIANGLES, 0, numIcons * 6);
 
-        // Pass 2: filled food icons
+        // Pass 2: filled and half food icons
         int filledIcons = food / 2;
-        if (filledIcons > 0) {
-            FloatBuffer filledBuf = BufferUtils.createFloatBuffer(filledIcons * 6 * 4);
+        boolean hasHalf = food % 2 == 1;
+        int activeDraw  = filledIcons + (hasHalf ? 1 : 0);
+        if (activeDraw > 0) {
+            FloatBuffer filledBuf = BufferUtils.createFloatBuffer(activeDraw * 6 * 4);
             for (int i = 0; i < filledIcons; i++) {
                 float x0 = foodStartX + i * stepW;
+                float y0 = foodBottomY;
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0+foodW).put(y0).put(1f).put(1f);
+                filledBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0+foodH).put(0f).put(0f);
+            }
+            if (hasHalf) {
+                float x0 = foodStartX + filledIcons * stepW;
                 float y0 = foodBottomY;
                 filledBuf.put(x0).put(y0).put(0f).put(1f);
                 filledBuf.put(x0+foodW).put(y0).put(1f).put(1f);
@@ -1338,10 +1351,20 @@ public class Renderer {
             glBufferSubData(GL_ARRAY_BUFFER, 0, filledBuf);
             glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-            glBindTexture(GL_TEXTURE_2D, foodFullTexId);
-            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
-            glBindVertexArray(foodVao);
-            glDrawArrays(GL_TRIANGLES, 0, filledIcons * 6);
+            // Draw full food icons
+            if (filledIcons > 0) {
+                glBindTexture(GL_TEXTURE_2D, foodFullTexId);
+                iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+                glBindVertexArray(foodVao);
+                glDrawArrays(GL_TRIANGLES, 0, filledIcons * 6);
+            }
+            // Draw half food icon
+            if (hasHalf) {
+                glBindTexture(GL_TEXTURE_2D, foodHalfTexId);
+                iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+                glBindVertexArray(foodVao);
+                glDrawArrays(GL_TRIANGLES, filledIcons * 6, 6);
+            }
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -1505,6 +1528,7 @@ public class Renderer {
         glDeleteVertexArrays(foodVao);
         glDeleteBuffers(foodVbo);
         if (foodFullTexId  != 0) glDeleteTextures(foodFullTexId);
+        if (foodHalfTexId  != 0) glDeleteTextures(foodHalfTexId);
         if (foodEmptyTexId != 0) glDeleteTextures(foodEmptyTexId);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
