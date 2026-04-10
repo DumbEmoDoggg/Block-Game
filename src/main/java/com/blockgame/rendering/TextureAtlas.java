@@ -88,6 +88,7 @@ public class TextureAtlas {
     public static final int TILE_IRON_ORE         = 30;
     public static final int TILE_GOLD_ORE         = 31;
     public static final int TILE_BEDROCK          = 32;
+    public static final int TILE_OAK_SAPLING      = 33;
 
     private final int textureId;
     private final int iconTextureId;
@@ -104,7 +105,7 @@ public class TextureAtlas {
         BlockType.STONE_SLAB,   BlockType.OBSIDIAN,     BlockType.GRAVEL,
         BlockType.COAL_ORE,     BlockType.IRON_ORE,     BlockType.GOLD_ORE,
         BlockType.DANDELION,    BlockType.POPPY,        BlockType.BROWN_MUSHROOM,
-        BlockType.RED_MUSHROOM
+        BlockType.RED_MUSHROOM, BlockType.OAK_SAPLING
     };
     public static final int ICON_SIZE   = 32; // pixels per icon
     public static final int ICON_COUNT  = ICON_BLOCKS.length;
@@ -226,6 +227,7 @@ public class TextureAtlas {
             case IRON_ORE:         return TILE_IRON_ORE;
             case GOLD_ORE:         return TILE_GOLD_ORE;
             case BEDROCK:          return TILE_BEDROCK;
+            case OAK_SAPLING:      return TILE_OAK_SAPLING;
             default:               return TILE_STONE;
         }
     }
@@ -428,6 +430,7 @@ public class TextureAtlas {
         drawTile(img, TILE_IRON_ORE,        loadTile(textureName("iron_ore"),        () -> stone()));
         drawTile(img, TILE_GOLD_ORE,        loadTile(textureName("gold_ore"),        () -> stone()));
         drawTile(img, TILE_BEDROCK,         loadTile(textureName("bedrock"),         () -> solid(46, 46, 46)));
+        drawTile(img, TILE_OAK_SAPLING,     loadTile(textureName("sapling"),         () -> solid(34, 139, 34)));
 
         return img;
     }

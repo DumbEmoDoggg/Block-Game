@@ -71,7 +71,9 @@ public enum BlockType {
     /** Small red mushroom; cross-shaped, non-solid decoration. */
     RED_MUSHROOM      (29, 0.90f, 0.15f, 0.15f, false, true,  null, true, true),
     /** Extremely dense volcanic glass; very dark purple. */
-    OBSIDIAN          (30, 0.12f, 0.07f, 0.18f, true,  false);
+    OBSIDIAN          (30, 0.12f, 0.07f, 0.18f, true,  false),
+    /** Young oak tree that grows into a full tree over time. */
+    OAK_SAPLING       (31, 0.20f, 0.55f, 0.10f, false, true,  new SaplingBehavior(), true, true);
 
     /** Compact id stored in chunk byte arrays. Max 255 types. */
     public final int id;

@@ -126,6 +126,28 @@ public class Renderer {
     // Gap between consecutive heart sprites, in texture pixels
     private static final float HEART_GAP_PX = 1.0f;
 
+    // Air bubble textures (bubble_full.png, bubble_empty.png)
+    private int bubbleFullTexId, bubbleEmptyTexId;
+    // VAO/VBO for the air-bubble bar (re-uploaded each frame when underwater)
+    private int bubbleVao, bubbleVbo;
+    // Number of air-bubble icons (10 bubbles = MAX_AIR / 30)
+    private static final int BUBBLE_COUNT = 10;
+    // Natural size of each bubble sprite in texture pixels (9×9)
+    private static final float BUBBLE_TEX_PX = 9.0f;
+    // Gap between bubbles, in texture pixels
+    private static final float BUBBLE_GAP_PX = 1.0f;
+
+    // Food bar textures (food_full.png, food_empty.png)
+    private int foodFullTexId, foodEmptyTexId;
+    // VAO/VBO for the food bar (re-uploaded each frame)
+    private int foodVao, foodVbo;
+    // Number of food icons (10 = MAX_FOOD / 2)
+    private static final int FOOD_COUNT = 10;
+    // Natural size of each food sprite in texture pixels (9×9)
+    private static final float FOOD_TEX_PX = 9.0f;
+    // Gap between food icons, in texture pixels
+    private static final float FOOD_GAP_PX = 1.0f;
+
     // Underwater overlay: a full-screen quad tinted with the underwater fog colour
     private int underwaterVao, underwaterVbo;
 
@@ -170,6 +192,10 @@ public class Renderer {
         hotbarTexId     = loadGuiTexture("hotbar");
         fullHeartTexId  = loadGuiTexture("full");
         halfHeartTexId  = loadGuiTexture("half");
+        bubbleFullTexId  = loadGuiTexture("bubble_full");
+        bubbleEmptyTexId = loadGuiTexture("bubble_empty");
+        foodFullTexId    = loadGuiTexture("food_full");
+        foodEmptyTexId   = loadGuiTexture("food_empty");
 
         // Read initial framebuffer size BEFORE building viewport-dependent geometry
         IntBuffer w = BufferUtils.createIntBuffer(1);
@@ -182,6 +208,8 @@ public class Renderer {
         // Build viewport-dependent geometry now that viewportW/H are set
         buildHotbarImage();
         buildHearts();
+        buildBubbleBar();
+        buildFoodBar();
 
         player.getCamera().updateProjection((float) viewportW / viewportH);
 
@@ -210,9 +238,12 @@ public class Renderer {
         rebuildDirtyMeshes();
         renderWorld();
         renderClouds();
+        // Render mobs BEFORE water so they are visible through the transparent
+        // water surface (water written to depth buffer would otherwise occlude
+        // submerged mobs if drawn afterward).
+        renderMobs(underwater);
         renderWater();
         renderParticles();
-        renderMobs();
         renderHighlight();
         if (underwater) renderUnderwaterOverlay();
         renderHud();
@@ -482,8 +513,21 @@ public class Renderer {
         mobRenderer.setMobManager(mm);
     }
 
-    private void renderMobs() {
+    private void renderMobs(boolean playerUnderwater) {
         if (mobRenderer == null) return;
+
+        // Pass the correct fog to the mob shader based on player eye state
+        if (playerUnderwater) {
+            mobRenderer.setFogParams(
+                new Vector3f(UW_FOG_R, UW_FOG_G, UW_FOG_B),
+                UW_FOG_START, UW_FOG_END);
+        } else {
+            float skyFogEnd = (World.RENDER_DISTANCE - 3) * Chunk.SIZE;
+            mobRenderer.setFogParams(
+                new Vector3f(SKY_R, SKY_G, SKY_B),
+                skyFogEnd * 0.6f, skyFogEnd);
+        }
+
         mobRenderer.render(
             player.getCamera().getViewMatrix(),
             player.getCamera().getProjectionMatrix()
@@ -618,6 +662,14 @@ public class Renderer {
 
         // --- Health hearts (above the hotbar, left-aligned) ---
         renderHearts();
+
+        // --- Food bar (above the hotbar, right-aligned) ---
+        renderFoodBar();
+
+        // --- Air bubbles (above the food bar, when drowning) ---
+        if (player.isEyeUnderwater() || player.getAir() < Player.MAX_AIR) {
+            renderAirBubbles();
+        }
 
         // --- Crosshair image (textured quad using GUI/crosshair.png) ---
         if (crosshairTexId != 0) {
@@ -1072,8 +1124,228 @@ public class Renderer {
     }
 
     // -------------------------------------------------------------------------
-    // GUI texture loader
+    // Air bubble bar
     // -------------------------------------------------------------------------
+
+    /**
+     * Allocates the VAO/VBO used for the air-bubble bar.
+     * Layout: 2 passes × BUBBLE_COUNT bubbles × 6 verts × 4 floats.
+     */
+    private void buildBubbleBar() {
+        bubbleVao = glGenVertexArrays();
+        bubbleVbo = glGenBuffers();
+
+        glBindVertexArray(bubbleVao);
+        glBindBuffer(GL_ARRAY_BUFFER, bubbleVbo);
+        glBufferData(GL_ARRAY_BUFFER, (long)(2 * BUBBLE_COUNT * 6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
+
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders 10 air-bubble icons above the food bar on the right side of the
+     * hotbar.  Shown whenever the player is underwater or air is not full.
+     */
+    private void renderAirBubbles() {
+        if (bubbleFullTexId == 0 || bubbleEmptyTexId == 0) return;
+
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+
+        float bubblePx = BUBBLE_TEX_PX * GUI_SCALE;
+        float gapPx    = BUBBLE_GAP_PX * GUI_SCALE;
+        float stepPx   = bubblePx + gapPx;
+        float bubbleW  = (viewportW > 0) ? 2.0f * bubblePx / viewportW : 0.028125f;
+        float bubbleH  = (viewportH > 0) ? 2.0f * bubblePx / viewportH : 0.05f;
+        float stepW    = (viewportW > 0) ? 2.0f * stepPx  / viewportW : 0.031250f;
+
+        // Layout mirrors heart positions but on the RIGHT side of the hotbar
+        float hotbarWpx   = HOTBAR_SLOTS * (SLOT_TEX_PX * GUI_SCALE) + 2 * (BORDER_TEX_PX * GUI_SCALE);
+        float hotbarHpx   = HOTBAR_TEX_PX_H * GUI_SCALE;
+        float hotbarW     = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
+        float hotbarH     = (viewportH > 0) ? 2.0f * hotbarHpx / viewportH : 0.1222f;
+        float bottomY     = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        // Bubbles sit one row ABOVE the food bar icons (food icons row + bubbleH + gap)
+        float foodRowGap  = (viewportH > 0) ? 2.0f * (2.0f * GUI_SCALE) / viewportH : 0.011f;
+        float foodRowH    = bubbleH;
+        float bubblesBottomY = bottomY + hotbarH + foodRowGap + foodRowH + foodRowGap;
+
+        // Align right edge with the right edge of the hotbar
+        float totalBubblesW = BUBBLE_COUNT * stepW - (stepW - bubbleW);
+        float bubblesStartX = hotbarW / 2.0f - totalBubblesW;
+
+        // Determine how many bubbles are full
+        int airBubbles = (int) Math.ceil((double) player.getAir() / Player.MAX_AIR * BUBBLE_COUNT);
+        airBubbles = Math.max(0, Math.min(BUBBLE_COUNT, airBubbles));
+
+        // Pass 1: empty bubbles
+        FloatBuffer emptyBuf = BufferUtils.createFloatBuffer(BUBBLE_COUNT * 6 * 4);
+        for (int i = 0; i < BUBBLE_COUNT; i++) {
+            float x0 = bubblesStartX + i * stepW;
+            float y0 = bubblesBottomY;
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0+bubbleW).put(y0).put(1f).put(1f);
+            emptyBuf.put(x0+bubbleW).put(y0+bubbleH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0+bubbleW).put(y0+bubbleH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0+bubbleH).put(0f).put(0f);
+        }
+        emptyBuf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, bubbleVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, emptyBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, bubbleEmptyTexId);
+        iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+        glBindVertexArray(bubbleVao);
+        glDrawArrays(GL_TRIANGLES, 0, BUBBLE_COUNT * 6);
+
+        // Pass 2: full bubbles on top
+        if (airBubbles > 0) {
+            FloatBuffer fullBuf = BufferUtils.createFloatBuffer(airBubbles * 6 * 4);
+            for (int i = 0; i < airBubbles; i++) {
+                float x0 = bubblesStartX + i * stepW;
+                float y0 = bubblesBottomY;
+                fullBuf.put(x0).put(y0).put(0f).put(1f);
+                fullBuf.put(x0+bubbleW).put(y0).put(1f).put(1f);
+                fullBuf.put(x0+bubbleW).put(y0+bubbleH).put(1f).put(0f);
+                fullBuf.put(x0).put(y0).put(0f).put(1f);
+                fullBuf.put(x0+bubbleW).put(y0+bubbleH).put(1f).put(0f);
+                fullBuf.put(x0).put(y0+bubbleH).put(0f).put(0f);
+            }
+            fullBuf.flip();
+            glBindBuffer(GL_ARRAY_BUFFER, bubbleVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, fullBuf);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            glBindTexture(GL_TEXTURE_2D, bubbleFullTexId);
+            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+            glBindVertexArray(bubbleVao);
+            glDrawArrays(GL_TRIANGLES, 0, airBubbles * 6);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Food bar
+    // -------------------------------------------------------------------------
+
+    /**
+     * Allocates the VAO/VBO used for the food bar.
+     */
+    private void buildFoodBar() {
+        foodVao = glGenVertexArrays();
+        foodVbo = glGenBuffers();
+
+        glBindVertexArray(foodVao);
+        glBindBuffer(GL_ARRAY_BUFFER, foodVbo);
+        glBufferData(GL_ARRAY_BUFFER, (long)(2 * FOOD_COUNT * 6 * 4) * Float.BYTES, GL_DYNAMIC_DRAW);
+
+        int stride = 4 * Float.BYTES;
+        glVertexAttribPointer(0, 2, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 2L * Float.BYTES);
+        glEnableVertexAttribArray(1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
+    }
+
+    /**
+     * Renders 10 food icons above the hotbar on the right side, mirroring the
+     * hearts on the left.
+     */
+    private void renderFoodBar() {
+        if (foodFullTexId == 0 || foodEmptyTexId == 0) return;
+
+        iconShader.use();
+        iconShader.setInt("uIcons", 0);
+
+        float foodPx   = FOOD_TEX_PX * GUI_SCALE;
+        float gapPx    = FOOD_GAP_PX * GUI_SCALE;
+        float stepPx   = foodPx + gapPx;
+        float foodW    = (viewportW > 0) ? 2.0f * foodPx / viewportW : 0.028125f;
+        float foodH    = (viewportH > 0) ? 2.0f * foodPx / viewportH : 0.05f;
+        float stepW    = (viewportW > 0) ? 2.0f * stepPx / viewportW : 0.031250f;
+
+        float hotbarWpx   = HOTBAR_SLOTS * (SLOT_TEX_PX * GUI_SCALE) + 2 * (BORDER_TEX_PX * GUI_SCALE);
+        float hotbarHpx   = HOTBAR_TEX_PX_H * GUI_SCALE;
+        float hotbarW     = (viewportW > 0) ? 2.0f * hotbarWpx / viewportW : 0.50625f;
+        float hotbarH     = (viewportH > 0) ? 2.0f * hotbarHpx / viewportH : 0.1222f;
+        float bottomY     = (viewportH > 0) ? -1.0f + 2.0f * HOTBAR_BOTTOM_PX / viewportH : -0.9833f;
+
+        float gapToPx     = 2.0f * GUI_SCALE;
+        float foodBottomY = bottomY + hotbarH
+            + ((viewportH > 0) ? 2.0f * gapToPx / viewportH : 0.011f);
+
+        // Right-align food icons with the right edge of the hotbar
+        float totalFoodW   = FOOD_COUNT * stepW - (stepW - foodW);
+        float foodStartX   = hotbarW / 2.0f - totalFoodW;
+
+        int food    = player.getFood();
+        int maxFood = player.getMaxFood();
+        int numIcons = maxFood / 2;
+
+        // Pass 1: empty containers
+        FloatBuffer emptyBuf = BufferUtils.createFloatBuffer(numIcons * 6 * 4);
+        for (int i = 0; i < numIcons; i++) {
+            float x0 = foodStartX + i * stepW;
+            float y0 = foodBottomY;
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0+foodW).put(y0).put(1f).put(1f);
+            emptyBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0).put(0f).put(1f);
+            emptyBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+            emptyBuf.put(x0).put(y0+foodH).put(0f).put(0f);
+        }
+        emptyBuf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, foodVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, emptyBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, foodEmptyTexId);
+        iconShader.setVector4f("uColor", 0.35f, 0.35f, 0.35f, 1.0f);
+        glBindVertexArray(foodVao);
+        glDrawArrays(GL_TRIANGLES, 0, numIcons * 6);
+
+        // Pass 2: filled food icons
+        int filledIcons = food / 2;
+        if (filledIcons > 0) {
+            FloatBuffer filledBuf = BufferUtils.createFloatBuffer(filledIcons * 6 * 4);
+            for (int i = 0; i < filledIcons; i++) {
+                float x0 = foodStartX + i * stepW;
+                float y0 = foodBottomY;
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0+foodW).put(y0).put(1f).put(1f);
+                filledBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0).put(0f).put(1f);
+                filledBuf.put(x0+foodW).put(y0+foodH).put(1f).put(0f);
+                filledBuf.put(x0).put(y0+foodH).put(0f).put(0f);
+            }
+            filledBuf.flip();
+            glBindBuffer(GL_ARRAY_BUFFER, foodVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, filledBuf);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            glBindTexture(GL_TEXTURE_2D, foodFullTexId);
+            iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
+            glBindVertexArray(foodVao);
+            glDrawArrays(GL_TRIANGLES, 0, filledIcons * 6);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
 
     /**
      * Loads a PNG image from {@code /GUI/<name>.png} on the classpath and
@@ -1226,6 +1498,14 @@ public class Renderer {
         glDeleteBuffers(heartVbo);
         if (fullHeartTexId != 0) glDeleteTextures(fullHeartTexId);
         if (halfHeartTexId != 0) glDeleteTextures(halfHeartTexId);
+        glDeleteVertexArrays(bubbleVao);
+        glDeleteBuffers(bubbleVbo);
+        if (bubbleFullTexId  != 0) glDeleteTextures(bubbleFullTexId);
+        if (bubbleEmptyTexId != 0) glDeleteTextures(bubbleEmptyTexId);
+        glDeleteVertexArrays(foodVao);
+        glDeleteBuffers(foodVbo);
+        if (foodFullTexId  != 0) glDeleteTextures(foodFullTexId);
+        if (foodEmptyTexId != 0) glDeleteTextures(foodEmptyTexId);
         glDeleteVertexArrays(highlightVao);
         glDeleteBuffers(highlightVbo);
     }
