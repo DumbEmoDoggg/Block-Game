@@ -160,6 +160,7 @@ public class Renderer {
     // Total parallelogram height; visible on-screen = (ARM_H_PX - ARM_BELOW_PX) × GUI_SCALE pixels
     private static final float ARM_H_PX          = 85.0f;
     private static final float ARM_SKEW_PX       = 25.0f;  // top shifts left by this much (parallelogram lean)
+    private static final float ARM_DEPTH_PX      = 12.0f;  // depth of the 3D arm box (right-side/top faces)
     private static final float ARM_RIGHT_PX      =  4.0f;  // gap from right edge of screen
     private static final float ARM_BELOW_PX      = 20.0f;  // arm bottom extends this far below screen
     // Held-item block icon size (logical pixels; × GUI_SCALE = screen pixels)
@@ -1471,6 +1472,56 @@ public class Renderer {
         float tlX = trX - armW;               // top-left x
         float tlY = trY;                       // top-left y
 
+        // 3-D depth offset in NDC: simulates the arm box extending into the scene
+        // (right face goes right and slightly upward, top face is the upper end-cap).
+        // Fallback values assume a 1280×720 viewport:
+        //   depthX = 2 * (12 * 2) / 1280 = 48/1280 = 0.0375
+        //   depthY = 2 * (12 * 2 * 0.5) / 720 = 24/720 ≈ 0.03333
+        float depthPxScaled = ARM_DEPTH_PX * GUI_SCALE;
+        float depthX = (viewportW > 0) ? 2.0f * depthPxScaled          / viewportW : 0.0375f;
+        float depthY = (viewportH > 0) ? 2.0f * (depthPxScaled * 0.5f) / viewportH : 0.03333f;
+
+        // Back corners (depth offset applied to the right edge and top edge)
+        float brRX = brX + depthX, brRY = brY + depthY;   // bottom-right back
+        float trRX = trX + depthX, trRY = trY + depthY;   // top-right back
+        float tlTX = tlX + depthX, tlTY = tlY + depthY;   // top-left back
+
+        glBindTexture(GL_TEXTURE_2D, armTexId);
+        glBindVertexArray(armVao);
+
+        // --- 1. Right side face (dark shadow – drawn first so front face covers its left edge) ---
+        // UV uses the right half of the texture (u 0.5→1) with a dark tint to simulate shadow.
+        armBuf.clear();
+        armBuf.put(brX).put(brY).put(0.5f).put(1f);
+        armBuf.put(brRX).put(brRY).put(1f).put(1f);
+        armBuf.put(trRX).put(trRY).put(1f).put(0f);
+        armBuf.put(brX).put(brY).put(0.5f).put(1f);
+        armBuf.put(trRX).put(trRY).put(1f).put(0f);
+        armBuf.put(trX).put(trY).put(0.5f).put(0f);
+        armBuf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, armVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, armBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        iconShader.setVector4f("uColor", 0.55f, 0.55f, 0.55f, 1f);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // --- 2. Top face (upper end-cap, slightly darker than front) ---
+        // Samples the top row of the texture (v=0) to pick up the hand colour.
+        armBuf.clear();
+        armBuf.put(tlX).put(tlY).put(0f).put(0f);
+        armBuf.put(trX).put(trY).put(1f).put(0f);
+        armBuf.put(trRX).put(trRY).put(1f).put(0f);
+        armBuf.put(tlX).put(tlY).put(0f).put(0f);
+        armBuf.put(trRX).put(trRY).put(1f).put(0f);
+        armBuf.put(tlTX).put(tlTY).put(0f).put(0f);
+        armBuf.flip();
+        glBindBuffer(GL_ARRAY_BUFFER, armVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, armBuf);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        iconShader.setVector4f("uColor", 0.80f, 0.80f, 0.80f, 1f);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // --- 3. Front face (full brightness, drawn last so it covers the side/top edges) ---
         // UV: v=0 → top of arm texture (hand), v=1 → bottom (sleeve)
         armBuf.clear();
         armBuf.put(blX).put(blY).put(0f).put(1f);
@@ -1480,14 +1531,10 @@ public class Renderer {
         armBuf.put(trX).put(trY).put(1f).put(0f);
         armBuf.put(tlX).put(tlY).put(0f).put(0f);
         armBuf.flip();
-
         glBindBuffer(GL_ARRAY_BUFFER, armVbo);
         glBufferSubData(GL_ARRAY_BUFFER, 0, armBuf);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-
         iconShader.setVector4f("uColor", 1f, 1f, 1f, 1f);
-        glBindTexture(GL_TEXTURE_2D, armTexId);
-        glBindVertexArray(armVao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         // --- Draw held block icon at the hand (top of arm) ---
