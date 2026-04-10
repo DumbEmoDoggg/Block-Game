@@ -255,19 +255,26 @@ public class TextureAtlas {
             BlockType block = ICON_BLOCKS[i];
             int ox = i * ICON_SIZE; // x offset in icon atlas
 
-            // Extract face tiles from the main atlas
-            BufferedImage topTile   = extractTile(mainAtlas, getTileId(block, true,  false));
-            BufferedImage sideTile  = extractTile(mainAtlas, getTileId(block, false, true));
-            BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
+            if (block.isPlant()) {
+                // Plant blocks (sapling, flowers, mushrooms) are flat cross-shaped
+                // sprites — render their texture directly as a 2D flat icon.
+                BufferedImage tile = extractTile(mainAtlas, getTileId(block, false, false));
+                drawFlatIcon(iconAtlas, tile, ox);
+            } else {
+                // Extract face tiles from the main atlas
+                BufferedImage topTile   = extractTile(mainAtlas, getTileId(block, true,  false));
+                BufferedImage sideTile  = extractTile(mainAtlas, getTileId(block, false, true));
+                BufferedImage rightTile = extractTile(mainAtlas, getTileId(block, false, true));
 
-            // --- Isometric layout (pixel art style) ---
-            // The icon is 32×32. We draw side faces first, then top face on top.
-            //   Left face:  left half  (x=0..15),  y=8..31
-            //   Right face: right half (x=16..31), y=8..31
-            //   Top face:   full-width diamond,     y=0..15 (drawn last, in front)
-            drawIsometricLeft(iconAtlas, sideTile, ox);
-            drawIsometricRight(iconAtlas, rightTile, ox);
-            drawIsometricTop(iconAtlas, topTile, ox);
+                // --- Isometric layout (pixel art style) ---
+                // The icon is 32×32. We draw side faces first, then top face on top.
+                //   Left face:  left half  (x=0..15),  y=8..31
+                //   Right face: right half (x=16..31), y=8..31
+                //   Top face:   full-width diamond,     y=0..15 (drawn last, in front)
+                drawIsometricLeft(iconAtlas, sideTile, ox);
+                drawIsometricRight(iconAtlas, rightTile, ox);
+                drawIsometricTop(iconAtlas, topTile, ox);
+            }
         }
 
         g2.dispose();
@@ -381,6 +388,31 @@ public class TextureAtlas {
                 int py = (TILE_SIZE - 1 + sx) / 2 + 1 + sy;
                 if (px >= ox + ICON_SIZE / 2 && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
                     dest.setRGB(px, py, argb);
+                }
+            }
+        }
+    }
+
+    /**
+     * Draws a flat (2-D) icon for plant blocks into {@code dest} at x-offset {@code ox}.
+     *
+     * <p>The 16×16 tile is scaled up 2× (nearest-neighbour) to fill the full
+     * {@link #ICON_SIZE}×{@link #ICON_SIZE} slot, so the sprite appears centred and
+     * clearly readable in the hotbar without any isometric projection.
+     */
+    private static void drawFlatIcon(BufferedImage dest, BufferedImage tile, int ox) {
+        int scale = ICON_SIZE / TILE_SIZE; // 2
+        for (int sy = 0; sy < TILE_SIZE; sy++) {
+            for (int sx = 0; sx < TILE_SIZE; sx++) {
+                int argb = tile.getRGB(sx, sy);
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        int px = ox + sx * scale + dx;
+                        int py = sy * scale + dy;
+                        if (px >= ox && px < ox + ICON_SIZE && py >= 0 && py < ICON_SIZE) {
+                            dest.setRGB(px, py, argb);
+                        }
+                    }
                 }
             }
         }
