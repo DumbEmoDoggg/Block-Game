@@ -3,6 +3,7 @@ package com.blockgame;
 import com.blockgame.input.InputAction;
 import com.blockgame.input.InputHandler;
 import com.blockgame.mob.MobManager;
+import com.blockgame.audio.SoundEngine;
 import com.blockgame.player.Player;
 import com.blockgame.rendering.ParticleSystem;
 import com.blockgame.rendering.Renderer;
@@ -60,6 +61,7 @@ public class Game {
     private Player player;
     private Renderer renderer;
     private InputHandler inputHandler;
+    private SoundEngine soundEngine;
 
     /** Ordered list of all active game systems; iterated every frame. */
     private final List<GameSystem> systems = new ArrayList<>();
@@ -139,6 +141,12 @@ public class Game {
         mobManager.setPlayer(player);
         mobManager.spawnInitial(player.getPosition());
         renderer.setMobManager(mobManager);
+
+        // Sound engine – initialised after GL context so OpenAL can coexist
+        soundEngine = new SoundEngine();
+        soundEngine.init();
+        player.setSoundEngine(soundEngine);
+        mobManager.setSoundEngine(soundEngine);
 
         // Restore the last saved world (if one exists)
         if (Files.exists(SAVE_FILE)) {
@@ -239,6 +247,8 @@ public class Game {
         for (int i = systems.size() - 1; i >= 0; i--) {
             systems.get(i).cleanup();
         }
+
+        if (soundEngine != null) soundEngine.cleanup();
 
         glfwFreeCallbacks(window);
         glfwDestroyWindow(window);

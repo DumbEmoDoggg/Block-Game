@@ -1,6 +1,7 @@
 package com.blockgame.mob;
 
 import com.blockgame.GameSystem;
+import com.blockgame.audio.SoundEngine;
 import com.blockgame.player.Player;
 import com.blockgame.world.World;
 import org.joml.Vector3f;
@@ -49,6 +50,9 @@ public class MobManager implements GameSystem {
     /** Optional player reference – required for combat. Set via {@link #setPlayer}. */
     private Player player = null;
 
+    /** Optional sound engine for mob audio events. Set via {@link #setSoundEngine}. */
+    private SoundEngine soundEngine = null;
+
     public MobManager(World world) {
         this.world = world;
     }
@@ -56,6 +60,11 @@ public class MobManager implements GameSystem {
     /** Connects the player so mobs can react to and attack it. */
     public void setPlayer(Player player) {
         this.player = player;
+    }
+
+    /** Connects the sound engine so mob audio events (ambient, step, hurt, death) are played. */
+    public void setSoundEngine(SoundEngine soundEngine) {
+        this.soundEngine = soundEngine;
     }
 
     // -------------------------------------------------------------------------
@@ -136,6 +145,10 @@ public class MobManager implements GameSystem {
                     continue;
                 }
 
+                float prevX    = mob.position.x;
+                float prevZ    = mob.position.z;
+                boolean wasAlive = mob.isAlive();
+
                 if (mob.type.isHostile()) {
                     float dx = pp.x - mob.position.x;
                     float dz = pp.z - mob.position.z;
@@ -147,21 +160,81 @@ public class MobManager implements GameSystem {
                         if (attacked) {
                             player.damage(mob.getAttackDamage());
                         }
-                        continue;
+                    } else {
+                        mob.update(dt, world);
                     }
+                } else {
+                    mob.update(dt, world);
                 }
-                mob.update(dt, world);
+
+                tickMobSounds(mob, dt, prevX, prevZ, wasAlive);
             }
 
             // Player melee attack: if player swings and hits a mob in range
             if (player.consumeAttackSwing()) {
-                attackMobsInRange(pp);
+                boolean hit = attackMobsInRange(pp);
+                if (soundEngine != null) {
+                    if (hit) {
+                        soundEngine.playPlayerAttackHit();
+                    } else {
+                        soundEngine.playPlayerAttackMiss();
+                    }
+                }
             }
         } else {
             // No player – simple wander-only update
             mobs.removeIf(mob -> !mob.isAlive());
             for (Mob mob : mobs) {
+                float prevX    = mob.position.x;
+                float prevZ    = mob.position.z;
+                boolean wasAlive = mob.isAlive();
                 mob.update(dt, world);
+                tickMobSounds(mob, dt, prevX, prevZ, wasAlive);
+            }
+        }
+    }
+
+    /**
+     * Handles ambient sound timers, footstep sounds, and death/hurt detection
+     * for a single mob after its physics update has been applied.
+     *
+     * @param mob     the mob just updated
+     * @param dt      frame delta time (seconds)
+     * @param prevX   mob X before the update
+     * @param prevZ   mob Z before the update
+     * @param wasAlive whether the mob was alive before the update
+     */
+    private void tickMobSounds(Mob mob, float dt, float prevX, float prevZ, boolean wasAlive) {
+        if (soundEngine == null) return;
+
+        float mx = mob.position.x;
+        float my = mob.position.y;
+        float mz = mob.position.z;
+
+        // Death / hurt detection
+        if (wasAlive && !mob.isAlive()) {
+            soundEngine.playMobDeath(mob.type, mx, my, mz);
+            return; // mob just died; skip other sounds
+        }
+
+        // Ambient "say" sound timer
+        mob.ambientSoundTimer -= dt;
+        if (mob.ambientSoundTimer <= 0f) {
+            soundEngine.playMobAmbient(mob.type, mx, my, mz);
+            mob.ambientSoundTimer =
+                SoundEngine.MOB_AMBIENT_INTERVAL_MIN
+                + random.nextFloat()
+                    * (SoundEngine.MOB_AMBIENT_INTERVAL_MAX - SoundEngine.MOB_AMBIENT_INTERVAL_MIN);
+        }
+
+        // Footstep sounds (only while on ground and moving)
+        if (mob.onGround && mob.isMoving) {
+            float ddx = mx - prevX;
+            float ddz = mz - prevZ;
+            mob.stepSoundAccumulator += (float) Math.sqrt(ddx * ddx + ddz * ddz);
+            if (mob.stepSoundAccumulator >= SoundEngine.STEP_DISTANCE) {
+                mob.stepSoundAccumulator -= SoundEngine.STEP_DISTANCE;
+                soundEngine.playMobStep(mob.type, mx, my, mz);
             }
         }
     }
@@ -169,9 +242,12 @@ public class MobManager implements GameSystem {
     /**
      * Damages any mob within {@link #PLAYER_ATTACK_REACH} that the player is
      * roughly facing (within ±90° of the camera direction).
+     *
+     * @return {@code true} if at least one mob was damaged
      */
-    private void attackMobsInRange(Vector3f playerPos) {
+    private boolean attackMobsInRange(Vector3f playerPos) {
         float[] forward = player.getLookDirectionXZ();
+        boolean hit = false;
         for (Mob mob : mobs) {
             if (!mob.isAlive()) continue;
             float dx = mob.position.x - playerPos.x;
@@ -182,9 +258,22 @@ public class MobManager implements GameSystem {
             // Check that the mob is roughly in front of the player
             float dot = (dist > 0.001f) ? (dx * forward[0] + dz * forward[1]) / dist : 0f;
             if (dot > -0.3f) { // within ~107° forward arc (arccos(-0.3) ≈ 107°)
+                boolean wasAlive = mob.isAlive();
                 mob.damage(PLAYER_ATTACK_DAMAGE);
+                hit = true;
+                if (soundEngine != null) {
+                    float mx = mob.position.x;
+                    float my = mob.position.y;
+                    float mz = mob.position.z;
+                    if (wasAlive && !mob.isAlive()) {
+                        soundEngine.playMobDeath(mob.type, mx, my, mz);
+                    } else {
+                        soundEngine.playMobHurt(mob.type, mx, my, mz);
+                    }
+                }
             }
         }
+        return hit;
     }
 
     @Override
