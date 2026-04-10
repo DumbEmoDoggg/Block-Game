@@ -186,6 +186,20 @@ public class World implements Saveable {
     }
 
     /**
+     * Returns {@code true} if there are no solid blocks between {@code wy+1}
+     * and the top of the world at the given XZ position, meaning the sky is
+     * directly above and this position is "light" (not dark).
+     *
+     * <p>Used by mob spawning to ensure hostile mobs only spawn in dark areas.
+     */
+    public boolean isExposedToSky(int wx, int wy, int wz) {
+        for (int y = wy + 1; y < Chunk.HEIGHT; y++) {
+            if (getBlock(wx, y, wz).solid) return false;
+        }
+        return true;
+    }
+
+    /**
      * Queues a block-tick for the given world position.  On the next call to
      * {@link #update} the block's {@link BlockBehavior#onTick} will be invoked
      * (if it still has a non-null behaviour at that point).  Duplicate
